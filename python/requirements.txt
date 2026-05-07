@@ -1,4 +1,5 @@
-numpy
-pandas
-matplotlib
-PySide6
+numpy>=2.0
+pandas>=2.0
+matplotlib>=3.8
+PySide6>=6.6
+shiboken6>=6.6
