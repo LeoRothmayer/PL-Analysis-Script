@@ -2,14 +2,6 @@
 PL_Auto_GUI.py
 ──────────────────────────────────────────────────────────────────────────────
 GUI for PL analysis with automatic dark / white matching.
-
-Key difference from PL_Software.py:
-  • Dark and white spectra are loaded in bulk (all files at once, or by folder).
-  • Matching to measurements is done automatically by (Center_E, int_time)
-    extracted from each file's header — no manual ruler-based pairing needed.
-  • Correction ratios are built with one click.
-  • Whitelight correction is applied automatically per PL file.
-  • Stitching uses least-squares overlap scaling + linear blending.
 ──────────────────────────────────────────────────────────────────────────────
 """
 
@@ -2183,7 +2175,7 @@ class DarkScalingTab(QWidget):
     """
 
     def __init__(self, get_files_fn, get_dark_dict, file_label: str = "PL",
-                 on_data_changed=None, mode: str = "pl",
+                 on_data_changed=None,
                  get_partner_dark_scales=None, dark_scale_dict: Optional[dict] = None):
         super().__init__()
         self.get_files_fn           = get_files_fn
@@ -2191,8 +2183,7 @@ class DarkScalingTab(QWidget):
         self.file_label             = file_label
         self.on_data_changed        = on_data_changed
         self.on_group_done          = None   # (ce: float) → None; called after each group is applied/skipped
-        self.mode                   = mode            # "pl" or "white"
-        self.get_partner_dark_scales = get_partner_dark_scales  # callable → {ce:{it:float}}
+        self.get_partner_dark_scales = get_partner_dark_scales  # callable → {filename: scale}
 
         self._groups:           list          = []
         self._group_idx:        int           = 0
@@ -2201,8 +2192,9 @@ class DarkScalingTab(QWidget):
         self._group_done:       dict          = {}   # {ce: bool} — single source of truth for pills
         self._group_pills:      dict          = {}   # {ce: QPushButton}
         self._externally_done:  set           = set()  # CEs marked done across tab-switches / session
-        self._scaling_windows:  dict          = {}   # {ce: (x_min, x_max)} — PL mode only
+        self._scaling_windows:  dict          = {}   # {ce: (x_min, x_max)}
         self._power_filter:     Optional[float] = None  # pipeline: show only CEs for this power
+        self._manual_scaling_in_progress: bool  = False  # suppresses power auto-advance
 
         # dark_scale_dict: optionally shared externally so multiple tabs write to the same dict.
         # Structure: {filename: dark_scale} — one entry per individual spectrum file.
@@ -2210,12 +2202,8 @@ class DarkScalingTab(QWidget):
 
         layout = QVBoxLayout(self)
 
-        if mode == "pl":
-            _title = (f"Pre-Processing:  Scale Dark to match {file_label} at edges  "
-                      "(dark_scale applied to dark before subtraction)")
-        else:
-            _title = (f"Pre-Processing:  Scale Dark to match {file_label} at edges  "
-                      "(individual dark_scale computed per file — same as PL mode)")
+        _title = (f"Pre-Processing:  Scale Dark to match {file_label} at edges  "
+                  "(dark_scale applied to dark before subtraction)")
         ctrl_box = QGroupBox(_title)
         cg = QVBoxLayout(ctrl_box)
 
@@ -2261,28 +2249,27 @@ class DarkScalingTab(QWidget):
         )
         cg.addWidget(self.status)
 
-        # ── Manual scale override (PL mode only) ──────────────────────────
+        # ── Manual scale override ─────────────────────────────────────────
         self.manual_scale_spin: Optional[QDoubleSpinBox] = None
         self.manual_scale_btn:  Optional[QPushButton]    = None
-        if mode == "pl":
-            manual_row = QHBoxLayout()
-            manual_row.addWidget(QLabel("Manual dark scale:"))
-            self.manual_scale_spin = QDoubleSpinBox()
-            self.manual_scale_spin.setRange(0.001, 1000.0)
-            self.manual_scale_spin.setDecimals(4)
-            self.manual_scale_spin.setSingleStep(0.01)
-            self.manual_scale_spin.setValue(1.0)
-            self.manual_scale_spin.setMaximumWidth(120)
-            self.manual_scale_btn = QPushButton("Apply Manual Scale")
-            self.manual_scale_btn.setToolTip(
-                "Enter a dark scale factor and click to apply it directly to the current group.\n"
-                "The plot updates immediately but the group is NOT auto-confirmed —\n"
-                "press 'Apply Scaling' to confirm and advance, or adjust further."
-            )
-            manual_row.addWidget(self.manual_scale_spin)
-            manual_row.addWidget(self.manual_scale_btn)
-            manual_row.addStretch()
-            cg.addLayout(manual_row)
+        manual_row = QHBoxLayout()
+        manual_row.addWidget(QLabel("Manual dark scale:"))
+        self.manual_scale_spin = QDoubleSpinBox()
+        self.manual_scale_spin.setRange(0.001, 1000.0)
+        self.manual_scale_spin.setDecimals(4)
+        self.manual_scale_spin.setSingleStep(0.01)
+        self.manual_scale_spin.setValue(1.0)
+        self.manual_scale_spin.setMaximumWidth(120)
+        self.manual_scale_btn = QPushButton("Apply Manual Scale")
+        self.manual_scale_btn.setToolTip(
+            "Enter a dark scale factor and click to apply it directly to the current group.\n"
+            "The plot updates immediately and the group is confirmed —\n"
+            "adjust the value and click again to refine."
+        )
+        manual_row.addWidget(self.manual_scale_spin)
+        manual_row.addWidget(self.manual_scale_btn)
+        manual_row.addStretch()
+        cg.addLayout(manual_row)
 
         layout.addWidget(ctrl_box)
 
@@ -2409,9 +2396,7 @@ class DarkScalingTab(QWidget):
             (self.ax_after,  "After scaling",  True),
         ]:
             ax.clear()
-            # Dark spectra (one per unique int_time).
-            # In PL mode: dark is shown raw (before) or × dark_scale (after).
-            # In white mode: dark is always shown × dark_scale (from PL tab).
+            # Dark spectra (one per unique int_time): raw in the before plot, scaled in the after plot.
             seen_it: set = set()
             for pf in pf_list:
                 it = pf.metadata["int_time"]
@@ -2422,11 +2407,7 @@ class DarkScalingTab(QWidget):
                 if dark_pf is not None:
                     xd = dark_pf.df["Energy"].to_numpy(float)
                     yd = dark_pf.df["Counts"].to_numpy(float)
-                    if self.mode == "pl" and apply_scale:
-                        ds   = self._get_dark_scale(ce, it)
-                        yd   = yd * ds
-                        dlbl = f"dark ×{ds:.4f}  {it:.3g} s"
-                    elif self.mode == "white":
+                    if apply_scale:
                         ds   = self._get_dark_scale(ce, it)
                         yd   = yd * ds
                         dlbl = f"dark ×{ds:.4f}  {it:.3g} s"
@@ -2471,7 +2452,7 @@ class DarkScalingTab(QWidget):
 
         # Restore manual scale spinbox: show the saved scale if one exists for
         # the first file in this group, otherwise reset to 1.0.
-        if self.mode == "pl" and self.manual_scale_spin is not None and pf_list:
+        if self.manual_scale_spin is not None and pf_list:
             fname = pf_list[0].metadata["filename"]
             saved_scale = self.dark_scale_dict.get(fname, 1.0)
             self.manual_scale_spin.blockSignals(True)
@@ -2763,19 +2744,17 @@ class DarkScalingTab(QWidget):
 
     def _apply_manual_scale(self):
         """
-        Apply the manually entered dark scale to ALL (power, it) combinations
-        in the current CE group.  The plot refreshes but the group is NOT
-        confirmed — the user still needs to press 'Apply to This Group' or
-        'No Scaling Needed' to advance.
+        Apply the manually entered dark scale to all files in the current CE
+        group.  Works in both PL and white modes.  The plot refreshes and the
+        group is confirmed immediately.
         """
-        if not self._groups or self.mode != "pl":
+        if not self._groups:
             return
         if self.manual_scale_spin is None:
             return
         ce, pf_list = self._groups[self._group_idx]
         scale = self.manual_scale_spin.value()
 
-        # Apply the manual scale as each file's individual dark scale.
         for pf in pf_list:
             self.dark_scale_dict[pf.metadata["filename"]] = scale
 
@@ -2786,11 +2765,14 @@ class DarkScalingTab(QWidget):
 
         self._draw_group()
         self.status.setText(
-            f"Manual scale {scale:.4f} applied to Center_E = {ce:.3f} eV  "
-            "(adjust further if needed, or press 'Next Group' to continue)."
+            f"Manual scale {scale:.4f} applied to Center_E = {ce:.3f} eV."
         )
-        if self.on_data_changed:
-            self.on_data_changed()
+        self._manual_scaling_in_progress = True
+        try:
+            if self.on_data_changed:
+                self.on_data_changed()
+        finally:
+            self._manual_scaling_in_progress = False
 
     def _reset(self):
         if not self._groups:
@@ -3284,7 +3266,7 @@ class PowerPipelineTab(QWidget):
             self._update_pl_pill_colors()
             if all(self._pl_done.values()):
                 self._show_pl_all_done()
-            else:
+            elif not self.embedded_pl_dark_tab._manual_scaling_in_progress:
                 next_p = next(
                     (p for p in self._pl_dark_powers if not self._pl_done.get(p)),
                     None
@@ -3598,7 +3580,6 @@ class MainWindow(QMainWindow):
             get_dark_dict=lambda: self.calib_tab.checked_dark_dict(),
             file_label="PL",
             on_data_changed=_on_std_pl_scaling_changed,
-            mode="pl",
             dark_scale_dict=self._std_dark_dict,
         )
         self.std_dark_scaling_wl_tab = DarkScalingTab(
@@ -3609,8 +3590,8 @@ class MainWindow(QMainWindow):
             get_dark_dict=lambda: self.calib_tab.checked_dark_dict(),
             file_label="White",
             on_data_changed=_on_std_wl_scaling_changed,
-            mode="white",
             get_partner_dark_scales=lambda: self._std_dark_dict,
+            dark_scale_dict=self._std_dark_dict,
         )
         self.std_corrections_tab = CorrectionsTab(
             get_pl_files=lambda: self.calib_tab.checked_pl_files(),
@@ -3663,7 +3644,6 @@ class MainWindow(QMainWindow):
             get_dark_dict=lambda: self.calib_tab.checked_dark_dict(),
             file_label="PL",
             on_data_changed=_on_pip_pl_scaling_changed,
-            mode="pl",
             dark_scale_dict=self._pipeline_dark_dict,
         )
         self.pipeline_wl_dark_tab = DarkScalingTab(
@@ -3674,8 +3654,8 @@ class MainWindow(QMainWindow):
             get_dark_dict=lambda: self.calib_tab.checked_dark_dict(),
             file_label="White",
             on_data_changed=_on_pip_wl_scaling_changed,
-            mode="white",
             get_partner_dark_scales=lambda: self._pipeline_dark_dict,
+            dark_scale_dict=self._pipeline_dark_dict,
         )
         # Pipeline embedded tabs: review each CE individually
         self.pipeline_pl_dark_tab.all_btn.setVisible(False)
@@ -3848,8 +3828,8 @@ class MainWindow(QMainWindow):
 
         # ── Three top-level tabs ──────────────────────────────────────────────
         tabs.addTab(self.calib_tab,          "① Load Files")
-        tabs.addTab(self.standard_mode_tab,  "② Standard Analysis")
-        tabs.addTab(self.pipeline_tab,       "③ Power-by-Power Pipeline")
+        tabs.addTab(self.pipeline_tab,       "② Power-by-Power Pipeline")
+        tabs.addTab(self.standard_mode_tab,  "③ Standard Analysis")
 
         self.setCentralWidget(tabs)
 
@@ -3909,8 +3889,19 @@ class MainWindow(QMainWindow):
         self.calib_tab.get_pip_ce_done           = lambda: self.pipeline_tab._pip_ce_done
 
         # ── Session restore ───────────────────────────────────────────────────
-        # Restore PL files first — _ingest_pl triggers reset_groups() which clears
-        # _externally_done, so done-group restore MUST come after.
+        # WL done-groups are restored BEFORE _ingest_pl so that the _save_session
+        # call inside _ingest_pl captures the correct wl_done_groups.
+        # PL done-groups must come AFTER _ingest_pl because _ingest_pl triggers
+        # on_pl_files_changed → reset_groups(), which clears _externally_done on
+        # the PL dark tabs.  WL tabs are unaffected by reset_groups, so their
+        # done state can be set first.
+        if self.calib_tab._restored_std_wl_done_groups:
+            self.std_dark_scaling_wl_tab.set_done_groups(
+                self.calib_tab._restored_std_wl_done_groups)
+        if self.calib_tab._restored_pip_wl_done_groups:
+            self.pipeline_wl_dark_tab.set_done_groups(
+                self.calib_tab._restored_pip_wl_done_groups)
+
         if self.calib_tab._restored_pl_paths:
             self.calib_tab._ingest_pl(self.calib_tab._restored_pl_paths)
 
@@ -3920,9 +3911,6 @@ class MainWindow(QMainWindow):
         if self.calib_tab._restored_std_pl_done_groups:
             self.std_dark_scaling_pl_tab.set_done_groups(
                 self.calib_tab._restored_std_pl_done_groups)
-        if self.calib_tab._restored_std_wl_done_groups:
-            self.std_dark_scaling_wl_tab.set_done_groups(
-                self.calib_tab._restored_std_wl_done_groups)
         self.std_dark_scaling_pl_tab.refresh_if_needed()
         self.std_dark_scaling_wl_tab.refresh_if_needed()
 
@@ -3934,11 +3922,13 @@ class MainWindow(QMainWindow):
         if self.calib_tab._restored_pip_pl_done_groups:
             self.pipeline_pl_dark_tab.set_done_groups(
                 self.calib_tab._restored_pip_pl_done_groups)
-        if self.calib_tab._restored_pip_wl_done_groups:
-            self.pipeline_wl_dark_tab.set_done_groups(
-                self.calib_tab._restored_pip_wl_done_groups)
         self.pipeline_pl_dark_tab.refresh_if_needed()
         self.pipeline_wl_dark_tab.refresh_if_needed()
+
+        # Re-save once so the session file reflects the fully-restored state.
+        # Without this, saves that occurred during _ingest_pl (before done-groups
+        # were set for the PL tabs) leave pl_done_groups as [] in the file.
+        self.calib_tab._save_session()
 
         # Crash recovery: restore standard-mode power stitch blend logs
         restored_std_psl = getattr(self.calib_tab, "_restored_std_power_stitch_logs", {})

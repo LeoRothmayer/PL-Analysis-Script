@@ -1,0 +1,91 @@
+{
+  "halogen_path": "C:/Users/rothm/OneDrive/Dokumente/01_Wichtig/Studium_Master/Masterarbeit/02_Analysis/05_PL/PL-Analysis-Script/example_data/HalogenLamp_Spectrum.txt",
+  "dark_paths": [
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.1s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.2s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.3s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.4s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.5s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.6s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.7s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.8s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.9s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_1.0s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_1.5s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_2.0s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_3.0s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_4.0s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_5.0s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.1s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.2s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.3s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.4s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.5s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.6s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.7s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.8s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.9s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_1.0s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_1.5s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_2.0s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_3.0s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_4.0s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_5.0s_000.origin"
+  ],
+  "white_paths": [
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\Whitelight\\whitelight_1.15eV_0.4s_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\Whitelight\\whitelight_1.3eV_0.4s_002.origin"
+  ],
+  "pl_paths": [
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_000.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_001.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_002.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_003.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_004.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_005.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_006.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_007.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_008.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_009.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_010.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_011.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_012.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_013.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_014.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_015.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_016.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_017.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_018.origin",
+    "C:\\Users\\rothm\\OneDrive\\Dokumente\\01_Wichtig\\Studium_Master\\Masterarbeit\\02_Analysis\\05_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_019.origin"
+  ],
+  "white_scales": {},
+  "standard": {
+    "dark_scales": {},
+    "pl_done_groups": [],
+    "wl_done_groups": [],
+    "power_stitch_blend_logs": {}
+  },
+  "pipeline": {
+    "dark_scales": {
+      "EPI-2061_reference_001.origin": 1.015838466169592,
+      "EPI-2061_reference_000.origin": 1.03,
+      "whitelight_1.15eV_0.4s_000.origin": 1.4014595292128331,
+      "whitelight_1.3eV_0.4s_002.origin": 1.03
+    },
+    "pl_done_groups": [
+      1.15,
+      1.3
+    ],
+    "wl_done_groups": [
+      1.15,
+      1.3
+    ],
+    "power_stitch_blend_logs": {},
+    "pip_ce_done": {
+      "1.1000": {
+        "1.1500": true,
+        "1.3000": true
+      }
+    }
+  }
+}
