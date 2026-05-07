@@ -23,8 +23,8 @@ The mathematical/functional basis of this script was written by myself, the GUI 
 
 ### II. Power-by-Power Pipeline
 
-Main focus, manual editing choices for each spectrum and individual stitching
+Main focus and recommended workflow. Fully guided 5-phase pipeline — dark scaling per power level, white-light dark scaling, automatic spectral correction with interactive plot views, power-by-power stitching, and a publication-ready power-series plot. All progress is auto-saved and restored on restart.
 
-### III. Automatic Mode
+### III. Automatic Analysis
 
-Automatic analysis with minimal manual input - all spectra will be edited at once - faster but less precise
+Step-by-step manual analysis with minimal automation. Blue "Continue" buttons and green tab labels guide the user through each completed step. Faster but less precise than the pipeline.

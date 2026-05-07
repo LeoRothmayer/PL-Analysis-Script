@@ -40,9 +40,9 @@ The main window has three outer tabs:
 |-----|------|---------|
 | ① | **Load Files** | Load all raw data; configure the session |
 | ② | **Power-by-Power Pipeline** | Guided single-tab pipeline — recommended workflow |
-| ③ | **Standard Analysis** | Manual step-by-step workflow (inner tabs ②–⑦) |
+| ③ | **Automatic Analysis** | Step-by-step workflow with guided progression (inner tabs ①–⑥) |
 
-Standard Analysis and the Power-by-Power Pipeline each maintain their **own independent dark-scale dictionaries**, so scaling applied in one mode never affects the other.
+The Power-by-Power Pipeline and Automatic Analysis each maintain their **own independent dark-scale dictionaries**, so scaling applied in one mode never affects the other.
 
 ---
 
@@ -64,7 +64,7 @@ All four sections have "Load Files …", "Load Folder …", and "Clear" buttons.
 
 Additional controls on this tab:
 - **New Session** — clears dark and white files from memory; halogen reference is kept.
-- **Load & Replay JSON …** — replays a previously exported analysis JSON into the **Standard Analysis** mode (see JSON Replay section below).
+- **Load & Replay JSON …** — replays a previously exported analysis JSON into the **Automatic Analysis** mode (see JSON Replay section below).
 
 **Session persistence:** every change is auto-saved to `PL_Auto_GUI_session.json` next to the script so the loaded files and all scaling state survive an application restart.
 
@@ -72,77 +72,71 @@ Additional controls on this tab:
 
 ## Tab ② — Power-by-Power Pipeline  *(main recommended workflow)*
 
-This tab provides a fully guided, self-contained analysis pipeline.  All five phases live inside a stacked widget — the user never needs to navigate away.  A persistent header bar shows phase-navigation buttons (① PL Dark → ② White Dark → ③ Correction → ④ Stitching → ⑤ Power Plot) that light up green as each phase is completed.
+This tab provides a fully guided, self-contained analysis pipeline.  All five phases live inside a stacked widget — the user never needs to navigate away.  A persistent header bar shows phase-navigation buttons (① PL Dark → ② White Dark → ③ Correction → ④ Stitching → ⑤ Power Plot) that light up **green** as each phase is completed and remain green after a restart.
 
 ### Overview page
 
-Press **▶ Start Pipeline** to begin.  The pipeline automatically skips to the furthest incomplete phase (e.g. jumps straight to Correction if all scaling is already done).  **Reset All** clears all scaling progress and returns to this overview.  **Load & Replay JSON …** replays a previously exported JSON into the pipeline mode.
+Press **▶ Start Pipeline** to begin.  The pipeline automatically skips to the furthest incomplete phase — if correction was already run in a previous session it is re-applied silently and the user lands directly on the Correction tab with results shown.  **Reset All** clears all scaling progress and returns to this overview.  **Load & Replay JSON …** replays a previously exported JSON into the pipeline mode.
 
 ---
 
 ### Phase ① — PL Dark Scaling  *(per-power)*
 
-**Goal:** for each excitation power level, scale the dark spectrum so that it matches the PL signal at spectral edges where no PL emission is expected.
+**Goal:** for each excitation power level, scale the dark spectrum so that it matches the PL signal at spectral edges where no real PL emission is expected.
 
-This phase differs from the standard mode's Dark Scaling: files are processed **one power level at a time**.  A row of pill buttons at the top of the page represents every power level found in the loaded PL files.  Pills are colour-coded:
+Files are processed **one power level at a time**.  A row of pill buttons represents every power level; pills are colour-coded:
 - **Grey** — not yet processed.
 - **Blue** — currently selected power.
-- **Green** — all `Center_E` groups for this power are done.
+- **Green** — all `Center_E` groups for this power are confirmed.
 
 **Steps for each power:**
 
-1. The embedded dark-scaling widget shows all PL spectra at the selected power grouped by `Center_E`.  A pill row inside the widget shows each spectral window (`Center_E`) with the same grey/blue/green colour coding.
+1. The embedded dark-scaling widget shows all PL spectra at the selected power grouped by `Center_E`.  A pill row shows each spectral window with the same grey/blue/green coding.
 
 2. **Drag a region** on the left plot to select a spectral edge window where PL counts ≈ dark counts.
 
-3. Press **Apply to This Group** — for each PL file in the group:
+3. Press **Apply Scaling** — for each PL file in the group:
    ```
    dark_scale(file) = mean(PL counts in window) / mean(dark counts in window)
    ```
-   `dark_scale` is stored in the pipeline dark-scale dictionary keyed by **filename**.
+   `dark_scale` is stored keyed by **filename**.
 
-4. After all `Center_E` groups for the current power are marked done, the tab auto-advances to the next undone power after a short delay.
+4. After all `Center_E` groups for the current power are confirmed, the tab auto-advances to the next undone power after a short delay.
 
-5. Once all powers are done, a **"② White Dark ▶"** button appears to advance to the next phase.
+5. Once all powers are done a **"② White Dark ▶"** button appears to advance.
 
 Additional actions per group:
-- **Apply to All Groups** — applies the same edge window to every `Center_E` group at once.
-- **No Scaling Needed** — marks a group done without computing a scale (when dark and PL already agree at edges).
-- **Reset Scales** — clears the `dark_scale` for the current group and resets its pill to grey.
+- **No Scaling Needed** — marks the group done without computing a scale.
+- **Apply Manual Scale** — enter a scale factor directly; the plot updates immediately but the group stays on screen for verification before confirming.
+- **Reset Scales** — clears the `dark_scale` for the current group.
 
 ---
 
 ### Phase ② — White Dark Scaling
 
-**Goal:** scale each white-light spectrum so that, after dark subtraction, it is on the same scale as the dark-corrected PL spectra.
+**Goal:** scale each white-light spectrum so that its dark subtraction is consistent with the PL dark subtraction from Phase ①.
 
-Because the dark was already matched to the PL signal in Phase ①, the white spectrum is now matched to the already-shifted dark:
-
-```
-white_scale(file) = mean(dark × dark_scale in window) / mean(white counts in window)
-```
-
-The subtraction formula for white then becomes:
+The dark is scaled to match the white spectrum at spectral edges:
 
 ```
-(white × white_scale − dark × dark_scale) / int_time
+dark_scale(white_file) = mean(white counts in window) / mean(dark counts in window)
 ```
 
-**Steps:** identical interaction model to Phase ① (drag edge window, apply per group or to all), but all spectral windows are processed at once — no per-power separation.  When all `Center_E` groups are done a **"③ Auto-Correct ▶"** button appears.
+**Steps:** identical interaction to Phase ① (drag edge window, apply per group), but all spectral windows are processed at once — no per-power separation.  The same manual scale and reset options are available.  When all `Center_E` groups are done a **"③ Auto-Correct ▶"** button appears.
 
 ---
 
 ### Phase ③ — Auto-Correction
 
-**Goal:** compute spectral correction coefficients and apply them to all PL files in one click.
+**Goal:** compute spectral correction coefficients and apply them to all PL files in one click, with interactive plot views for verification.
 
-Press **Run Correction**.  Internally this calls two steps in sequence:
+Press **Run Correction**.  Internally:
 
 **Step A — Build correction coefficients.**  For each white-light file at a given `Center_E`:
 
 1. Dark-subtract and normalise the white spectrum:
    ```
-   normalised_white(E) = (white(E) × white_scale − dark(E) × dark_scale) / int_time
+   normalised_white(E) = (white(E) − dark(E) × dark_scale) / int_time
    ```
 2. Interpolate the halogen lamp reference onto the white spectrum's energy grid.
 3. Compute:
@@ -150,15 +144,27 @@ Press **Run Correction**.  Internally this calls two steps in sequence:
    correction_coefficient(E) = halogen(E) / normalised_white(E)
    ```
 
-A **soft inline warning** is shown if fewer than 20 % of points in a window have non-positive normalised white values.  A **blocking dialog** appears if 20 % or more are affected (indicates over-aggressive dark scaling).
+A **soft inline warning** is shown if fewer than 20 % of points have non-positive normalised white values.  A **blocking dialog** appears if 20 % or more are affected.
 
 **Step B — Apply correction to all checked PL files.**  For each PL file:
-
 ```
 corrected(E) = [(PL(E) − dark(E) × dark_scale) / int_time] × correction_coefficient(E)
 ```
 
-After a successful run, the correction coefficients are plotted (log-y) and a **"✓ Correction Done — ④ Stitch ▶"** button appears.
+After a successful run the **"✓ Correction Done — ④ Stitch ▶"** button appears.  The correction state is saved to the session so that on the next restart the correction is re-applied automatically and phase ③ immediately shows green.
+
+#### Plot view selector
+
+Four view buttons let the user inspect the data at different processing stages without leaving the correction tab:
+
+| View | Content |
+|------|---------|
+| **Correction Coefficients** | `halogen / normalised_white` per `Center_E` (log-y) |
+| **Raw PL Data** | Unprocessed counts from the original files |
+| **Dark-Subtracted & Normalised** | After dark subtraction and integration-time normalisation |
+| **Fully Corrected** | After spectral correction — ready for stitching |
+
+In views 2–4, all spectral windows belonging to the same power level share the same colour.
 
 ---
 
@@ -166,20 +172,27 @@ After a successful run, the correction coefficients are plotted (log-y) and a **
 
 **Goal:** join corrected sub-spectra from adjacent spectral windows into a single continuous spectrum, independently for each excitation power level.
 
-The stitch tab operates in **power-by-power mode**: a row of power-level pills tracks which powers are stitched.  Each power is stitched through the same number of steps as there are adjacent window pairs.
+A row of power-level pills tracks which powers are stitched (green = done).  Navigating back to an already-stitched power shows the **final stitched result directly** rather than restarting the step workflow; the user can still press **↺ Redo This Power** to redo it.
 
 **Stitching algorithm (one step per adjacent window pair):**
 
-1. The plot shows the current left and right spectra overlaid for all power groups.
-2. **Drag a blend window** in the overlap region of the two spectra.
+1. The plot shows the current left and right spectra overlaid.
+2. **Drag a blend window** in the overlap region.
 3. Press **Do Stitch**:
    - Compute `ratio = mean(left counts in window) / mean(right counts in window)`.
    - Scale the **right** spectrum by `ratio`.
-   - Concatenate: all left-spectrum points up to the blend start, then all (scaled) right-spectrum points from the blend start onward.
-4. The same blend window is used for every power group in that step, preserving relative intensities between power levels.
+   - Concatenate: left points up to the blend start, right (scaled) points from the blend start onward.
+4. The same blend window is applied across all power groups in that step, preserving relative intensities.
 5. After the final step the accumulated stitched spectra are shown overlaid.
 
-Results and blend parameters are saved per-power so that individual powers can be revisited.  After stitching is complete, a **"⑤ Power Series Plot →"** button appears.
+After all powers are stitched, press **Save All** to export DAT files and a JSON metadata file.
+
+**Save formats:** DAT (tab-separated, Energy / Counts) and JSON metadata.  DAT files go into a `dat/` subfolder of the chosen output directory.
+
+**Output filename convention:**
+```
+{sample_name}_{power:.2f}mW_stitched_{temperature:.1f}K.dat
+```
 
 ---
 
@@ -199,57 +212,53 @@ Save as PNG and/or SVG at 300 dpi.
 
 ---
 
-## Tab ③ — Standard Analysis  *(manual step-by-step)*
+## Tab ③ — Automatic Analysis  *(step-by-step)*
 
-This tab wraps the manual analysis workflow in an inner tab widget with six sub-tabs.  It shares the same PL, dark, and white files from Tab ① but uses its own independent dark-scale dictionary.
+This tab wraps the step-by-step analysis workflow in an inner tab widget with six sub-tabs (① – ⑥).  It shares the same PL, dark, and white files from Tab ① but uses its own independent dark-scale dictionary.
 
-### Inner tab ② — Dark Scaling (PL)
+**Guided progression:** when a step is complete, a blue **"▶ Continue to …"** button appears in the upper right.  Completed tab labels turn **green** to show overall progress.
 
-Identical interaction to Pipeline Phase ① but without per-power separation — all power levels and `Center_E` groups are presented together.
+### Inner tab ① — Dark Scaling (PL)
 
-### Inner tab ③ — Dark Scaling (White)
+Identical interaction to Pipeline Phase ① but without per-power separation — all power levels and `Center_E` groups are presented together.  A **Next Group** button navigates to the next CE group without applying the current window.
+
+### Inner tab ② — Dark Scaling (White)
 
 Identical to Pipeline Phase ②.
 
-### Inner tab ④ — Apply Corrections
+### Inner tab ③ — Apply Corrections
 
 Two sections:
 
-**A. Dark Subtraction & Normalisation** — Press **Apply Dark Subtraction to All Checked PL Files**.  For each PL file:
+**A. Dark Subtraction & Normalisation** — Press **Apply Dark Subtraction**.  For each PL file:
 ```
 normalised(E) = (PL(E) − dark(E) × dark_scale) / int_time
 ```
 Result is plotted on a log-y scale grouped by excitation power.
 
-**B. Spectral Correction Coefficients** — Press **Build Correction Ratios** to compute `correction_coefficient(E) = halogen(E) / normalised_white(E)` per `Center_E`, with the same bad-point warnings as Phase ③ of the pipeline.
+**B. Spectral Correction Coefficients** — Press **Build Correction Ratios** to compute `correction_coefficient(E) = halogen(E) / normalised_white(E)` per `Center_E`, with the same bad-point warnings as Pipeline Phase ③.
 
-### Inner tab ⑤ — PL Analysis
+### Inner tab ④ — PL Analysis
 
-Press **Apply Correction to Checked** to apply the spectral correction to all selected PL files.  Two plot modes: **Plot Dark-Subtracted** (normalised, uncorrected) and **Plot Corrected** (fully corrected, grouped by `Center_E`).  A `✓`/`✗` column tracks which files have been corrected.
+Press **Apply Correction to Checked** to apply the spectral correction to all selected PL files.  Two plot modes: **Plot Dark-Subtracted** and **Plot Corrected**.  A `✓`/`✗` column tracks which files have been corrected.
 
-Press **Stitch Power by Power →** to hand the corrected files to the stitch tab in power-by-power mode, identical to Pipeline Phase ④.
+Press **Stitch Power by Power →** to enter power-by-power stitching mode (identical to Pipeline Phase ④).
 
-### Inner tab ⑥ — Stitch & Export
+### Inner tab ⑤ — Stitch & Export
 
-**Standard mode** (without power-by-power): files are grouped by excitation power, all groups are stitched with the same blend window applied simultaneously.
+**Standard mode**: all power groups are stitched simultaneously with the same blend window.
 
-**Power-by-power mode** (entered via the button in tab ⑤): each power is stitched independently, accumulating results.
+**Power-by-power mode** (entered via the button in tab ④): each power is stitched independently.
 
-**Save formats:** DAT (tab-separated, Energy / Counts), PNG, PDF, and a JSON metadata file.  DAT, PNG, and PDF go into `dat/`, `png/`, `pdf/` subfolders of the chosen output directory.
+**Save formats:** DAT (tab-separated) and JSON metadata.
 
-**Output filename convention:**
-```
-{sample_name}_{power:.2f}mW_stitched_{temperature:.1f}K.{ext}
-```
-The sample name is extracted from the first file's path using the pattern `…/{sample}_NNN.origin`.
-
-**JSON metadata** (`{sample}_PL_analysis_{date}.json`) records every analysis parameter:
+**JSON metadata** (`{sample}_PL_analysis_{date}.json`) records:
 - Per-group dark scaling windows and `dark_scale` factors (keyed by filename).
 - Per-group white scaling windows and `white_scale` factors.
 - Correction coefficient energy ranges and quality statistics.
 - Stitching blend windows and per-power scaling ratios.
 
-### Inner tab ⑦ — Power Series Plot
+### Inner tab ⑥ — Power Series Plot
 
 Same controls and output as Pipeline Phase ⑤.
 
@@ -260,14 +269,15 @@ Same controls and output as Pipeline Phase ⑤.
 Every file-loading and scaling action is auto-saved to `PL_Auto_GUI_session.json` in the same folder as the script.  The session JSON has two top-level sections — `"standard"` and `"pipeline"` — so both modes survive independently across restarts.
 
 Each section stores:
-- Dark-scale factors per filename.
-- White-scale factors per white file.
-- Which `Center_E` groups were marked done on the scaling tab.
+- Dark-scale factors per filename (both PL and white files share the same dict).
+- Which `Center_E` groups were marked done on each scaling tab.
 - Stitch blend logs per power.
 
-The pipeline section additionally stores `pip_ce_done`: `{power: {Center_E: bool}}`, which tracks the done state of each spectral window independently for every excitation power.
+The pipeline section additionally stores:
+- `pip_ce_done`: `{power: {Center_E: bool}}` — per-power CE done state for Phase ①.
+- `correction_applied`: whether Phase ③ was completed — triggers silent re-application on the next startup so phase ③ shows green immediately.
 
-On startup, PL files are loaded first (which resets scaling tabs), then all scale values and done-group states are restored so the pills immediately reflect the saved state.
+On startup, PL files are loaded first, then all scale values and done-group states are restored so pills and phase indicators immediately reflect the saved state.
 
 ---
 
@@ -275,10 +285,10 @@ On startup, PL files are loaded first (which resets scaling tabs), then all scal
 
 A previously exported analysis JSON can be loaded to reproduce the exact analysis automatically.
 
-- **Standard mode replay**: **Load & Replay JSON …** in Tab ①.  Validates that all required files are loaded, then applies dark scales, white scales, rebuilds correction coefficients, applies correction to PL files, and runs stitching.  Navigates to the Stitch tab when done.
-- **Pipeline mode replay**: **Load & Replay JSON …** on the Pipeline overview page.  Same steps, but all actions target the pipeline-mode tabs and dark-scale dictionary.
+- **Automatic Analysis replay**: **Load & Replay JSON …** in Tab ①.  Validates that all required files are loaded, then applies dark scales, white scales, rebuilds correction coefficients, applies correction to PL files, and runs stitching.
+- **Pipeline replay**: **Load & Replay JSON …** on the Pipeline overview page.  Same steps targeting the pipeline-mode tabs.
 
-If any required file is missing, a detailed list of what is absent is shown before anything is applied.
+If any required file is missing, a detailed list is shown before anything is applied.
 
 ---
 
@@ -287,13 +297,13 @@ If any required file is missing, a detailed list of what is absent is shown befo
 ```
 Raw PL counts
     │
-    ├─ subtract  dark × dark_scale(file)       (Phase ①/Standard ②: per-file scale)
+    ├─ subtract  dark × dark_scale(file)       (Phase ①/Auto ①: per-file scale)
     ├─ divide by int_time                      (normalise to counts/second)
-    ├─ multiply by correction_coefficient(E)   (Phase ③/Standard ④: halogen / norm_white)
+    ├─ multiply by correction_coefficient(E)   (Phase ③/Auto ③: halogen / norm_white)
     │                                           norm_white uses same dark_scale
-    │                                           and white × white_scale (Phase ②/Standard ③)
-    └─ stitch adjacent windows                 (Phase ④/Standard ⑥: ratio scaling,
+    │                                           and white dark_scale (Phase ②/Auto ②)
+    └─ stitch adjacent windows                 (Phase ④/Auto ⑤: ratio scaling,
          │                                      left unchanged, right scaled by ratio,
-         │                                      then concatenated at the blend point)
+         │                                      concatenated at the blend point)
          └─ corrected PL spectrum  [a.u., proportional to photon emission rate / eV]
 ```

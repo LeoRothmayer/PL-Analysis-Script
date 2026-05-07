@@ -27,7 +27,6 @@ except Exception:
 import numpy as np
 import pandas as pd
 import shiboken6
-import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -666,8 +665,9 @@ class CalibrationTab(QWidget):
         self.get_pip_wl_done_groups    = None   # () → set[float]
         self.get_pip_dark_scales       = None   # () → {filename: scale}
         self.get_pip_power_stitch_logs = None   # () → {power: [blend_log]}
-        self.get_pip_ce_done           = None   # () → {power: {ce: bool}}
-        self.on_replay_requested       = None   # (json_path: str) → triggers MainWindow replay
+        self.get_pip_ce_done               = None   # () → {power: {ce: bool}}
+        self.get_pip_correction_applied    = None   # () → bool
+        self.on_replay_requested           = None   # (json_path: str) → triggers MainWindow replay
         self._restore_session()
 
     # ── Session control ──────────────────────────────────────────────────────
@@ -761,6 +761,11 @@ class CalibrationTab(QWidget):
                             else getattr(self, "_restored_pip_ce_done", {})
                         ).items()
                     },
+                    "correction_applied": bool(
+                        self.get_pip_correction_applied()
+                        if self.get_pip_correction_applied
+                        else getattr(self, "_restored_pip_correction_applied", False)
+                    ),
                 },
             }, indent=2))
         except Exception:
@@ -850,6 +855,9 @@ class CalibrationTab(QWidget):
             for p_str, ce_dict in raw_pcd.items()
             if isinstance(ce_dict, dict)
         }
+        self._restored_pip_correction_applied = bool(
+            pip_raw.get("correction_applied", False)
+        )
 
     # ── Halogen ──────────────────────────────────────────────────────────────
     def _load_halogen(self):
@@ -1078,6 +1086,7 @@ class CorrectionsTab(QWidget):
 
         self.normalized:      dict = {}   # filename → dark-sub / normalised df
         self.correction_dict: dict = {}   # Center_E → correction_coefficient df
+        self.on_data_changed  = None      # () → None; called when either step completes
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -1169,6 +1178,8 @@ class CorrectionsTab(QWidget):
             )
         if errors:
             QMessageBox.warning(self, "Dark subtraction warnings", "\n".join(errors))
+        if self.normalized and self.on_data_changed:
+            self.on_data_changed()
 
     # ── Build Correction Ratios ───────────────────────────────────────────────
     def _build_correction(self):
@@ -1216,6 +1227,8 @@ class CorrectionsTab(QWidget):
             # Hard warnings (≥ threshold) → blocking dialog
             if hard_errors:
                 QMessageBox.warning(self, "Build warnings", "\n".join(hard_errors))
+            if self.correction_dict and self.on_data_changed:
+                self.on_data_changed()
         except Exception as exc:
             QMessageBox.critical(self, "Error", str(exc))
 
@@ -1238,6 +1251,7 @@ class PLAnalysisTab(QWidget):
         self.get_normalized      = get_normalized
         self.get_dark_scale_dict = get_dark_scale_dict or (lambda: {})
         self.corrected: dict = {}   # filename → whitelight-corrected df
+        self.on_data_changed = None      # () → None; called when correction is applied
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -1339,6 +1353,8 @@ class PLAnalysisTab(QWidget):
         if errors:
             QMessageBox.warning(self, "Correction warnings", "\n".join(errors))
         self._plot_corrected()
+        if self.corrected and self.on_data_changed:
+            self.on_data_changed()
 
     # ── Helpers ──────────────────────────────────────────────────────────────
     def _checked_files(self) -> list:
@@ -1465,6 +1481,8 @@ class StitchTab(QWidget):
         self.get_pl_scaling_meta    = get_pl_scaling_meta or (lambda: {})
         self.get_wl_scaling_meta    = get_wl_scaling_meta or (lambda: {})
 
+        self.on_stitching_done = None   # () → None; called when all stitching is complete
+
         # ── State ─────────────────────────────────────────────────────────
         self.power_groups:     dict = {}   # {power: [(df, pf), …]}
         self.stitched_results: dict = {}   # {power: df}
@@ -1567,14 +1585,10 @@ class StitchTab(QWidget):
         fmt_row = QHBoxLayout()
         fmt_row.addWidget(QLabel("Save formats:"))
         self.chk_csv  = QCheckBox("DAT")
-        self.chk_png  = QCheckBox("PNG")
-        self.chk_pdf  = QCheckBox("PDF")
         self.chk_json = QCheckBox("JSON metadata")
         self.chk_csv.setChecked(True)
-        self.chk_png.setChecked(True)
-        self.chk_pdf.setChecked(True)
         self.chk_json.setChecked(True)
-        for chk in [self.chk_csv, self.chk_png, self.chk_pdf, self.chk_json]:
+        for chk in [self.chk_csv, self.chk_json]:
             fmt_row.addWidget(chk)
         fmt_row.addStretch()
         cg.addLayout(fmt_row)
@@ -1812,6 +1826,8 @@ class StitchTab(QWidget):
                     self.status.setText(
                         f"All {n_total} power(s) stitched!  Press 'Save All' to export."
                     )
+                    if self.on_stitching_done:
+                        self.on_stitching_done()
                 else:
                     remaining = [p for p in self._power_order if not self._power_done.get(p)]
                     self.status.setText(
@@ -1828,6 +1844,8 @@ class StitchTab(QWidget):
                         QTimer.singleShot(600, lambda p=next_undone: self._goto_power(p))
             else:
                 self.save_btn.setEnabled(True)
+                if self.on_stitching_done:
+                    self.on_stitching_done()
                 self.status.setText(
                     f"All {self.n_steps} step(s) done  |  "
                     f"last blend {x_min:.4f}–{x_max:.4f} eV  |  "
@@ -1937,7 +1955,7 @@ class StitchTab(QWidget):
             btn.setStyleSheet(_OK if self._power_done.get(p, False) else _WAIT)
 
     def _start_current_power(self):
-        """Start the N-step stitching workflow for the current power in power mode."""
+        """Start (or resume) the N-step stitching workflow for the current power."""
         self.refresh_checklist()
         groups = self.get_corrected_grouped()
         power = self._power_order[self._power_idx]
@@ -1951,17 +1969,43 @@ class StitchTab(QWidget):
         self._power_groups_all[power] = pfs
         self.power_groups = {power: pfs}
         self.n_steps = len(pfs) - 1
-        self.current_step = 0
-        self._blend_log = []
-        self.stitched_results = {power: pfs[0][0].copy()}
-        self._show_step()
         n_done = sum(1 for v in self._power_done.values() if v)
-        self.status.setText(
-            f"Power {self._power_idx + 1}/{len(self._power_order)}: {power:.2f} mW  "
-            f"({'✓ done — redoing' if self._power_done.get(power) else 'in progress'})  "
-            f"|  {n_done}/{len(self._power_order)} powers complete."
-        )
         self._update_power_pills()
+
+        if self._power_done.get(power) and power in self._power_stitched:
+            # Power already stitched — show the final result immediately.
+            self._clear_span()
+            self.current_step = self.n_steps - 1
+            self._blend_log = list(self._power_blend_logs.get(power, []))
+            self.stitched_results = {power: self._power_stitched[power].copy()}
+            stitched_df = self._power_stitched[power]
+            self.plot.plot_series(
+                [(stitched_df["Energy"].to_numpy(), stitched_df["Counts"].to_numpy(),
+                  f"{power:.2f} mW  stitched")],
+                f"✓ {power:.2f} mW — already stitched  "
+                f"({n_done}/{len(self._power_order)} powers done)  "
+                "— press '↺ Redo This Power' to redo",
+                log_y=True,
+            )
+            self.step_label.setText(
+                f"Step {self.n_steps}/{self.n_steps}  ✓  —  Done"
+            )
+            self.do_btn.setEnabled(False)
+            self.save_btn.setEnabled(n_done == len(self._power_order))
+            self.status.setText(
+                f"✓ {power:.2f} mW already stitched  "
+                f"({n_done}/{len(self._power_order)} powers done).  "
+                "Use pills or ▶ to navigate, or '↺ Redo This Power' to redo."
+            )
+        else:
+            self.current_step = 0
+            self._blend_log = []
+            self.stitched_results = {power: pfs[0][0].copy()}
+            self._show_step()
+            self.status.setText(
+                f"Power {self._power_idx + 1}/{len(self._power_order)}: {power:.2f} mW  "
+                f"|  {n_done}/{len(self._power_order)} powers complete."
+            )
 
     def _goto_power(self, power: float):
         if power in self._power_order:
@@ -2065,12 +2109,10 @@ class StitchTab(QWidget):
             return
 
         save_csv  = self.chk_csv.isChecked()
-        save_png  = self.chk_png.isChecked()
-        save_pdf  = self.chk_pdf.isChecked()
         save_json = self.chk_json.isChecked()
-        if not any([save_csv, save_png, save_pdf, save_json]):
+        if not any([save_csv, save_json]):
             QMessageBox.warning(self, "No format selected",
-                "Check at least one output format (DAT / PNG / PDF / JSON).")
+                "Check at least one output format (DAT / JSON).")
             return
 
         folder = QFileDialog.getExistingDirectory(self, "Select output folder")
@@ -2081,10 +2123,6 @@ class StitchTab(QWidget):
         # Create per-format subfolders up-front
         if save_csv:
             (out / "dat").mkdir(exist_ok=True)
-        if save_png:
-            (out / "png").mkdir(exist_ok=True)
-        if save_pdf:
-            (out / "pdf").mkdir(exist_ok=True)
 
         saved, errors = [], []
 
@@ -2108,27 +2146,6 @@ class StitchTab(QWidget):
                     saved.append(f"dat/{base}.dat")
                 except Exception as exc:
                     errors.append(f"{base}.dat: {exc}")
-
-            # ── PNG / PDF ─────────────────────────────────────────────────
-            if save_png or save_pdf:
-                try:
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    x = result_df["Energy"].to_numpy(float)
-                    y = result_df["Counts"].to_numpy(float)
-                    ax.semilogy(x, np.where(y > 0, y, np.nan))
-                    ax.set_xlabel("Energy (eV)")
-                    ax.set_ylabel("Counts")
-                    ax.set_title(base)
-                    fig.tight_layout()
-                    if save_png:
-                        fig.savefig(str(out / "png" / f"{base}.png"), dpi=150)
-                        saved.append(f"png/{base}.png")
-                    if save_pdf:
-                        fig.savefig(str(out / "pdf" / f"{base}.pdf"))
-                        saved.append(f"pdf/{base}.pdf")
-                    plt.close(fig)
-                except Exception as exc:
-                    errors.append(f"{base} plot: {exc}")
 
         # ── JSON metadata ─────────────────────────────────────────────────
         if save_json:
@@ -2210,7 +2227,7 @@ class DarkScalingTab(QWidget):
         # ── Buttons ───────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         self.apply_btn = QPushButton("Apply Scaling")
-        self.all_btn   = QPushButton("Apply to All Groups")
+        self.all_btn   = QPushButton("Next Group")
         self.skip_btn  = QPushButton("No Scaling Needed")
         self.skip_btn.setToolTip(
             "Mark this group as done without applying any scaling.\n"
@@ -2282,7 +2299,7 @@ class DarkScalingTab(QWidget):
         layout.addWidget(self.canvas)
 
         self.apply_btn.clicked.connect(self._apply_group)
-        self.all_btn.clicked.connect(self._apply_all)
+        self.all_btn.clicked.connect(self._next_group)
         self.skip_btn.clicked.connect(self._skip)
         self.reset_btn.clicked.connect(self._reset)
         if self.manual_scale_btn is not None:
@@ -2352,7 +2369,6 @@ class DarkScalingTab(QWidget):
         self.range_label.setText(f"Edge window:  {xmin:.4f} – {xmax:.4f} eV")
         self.range_label.setStyleSheet("")
         self.apply_btn.setEnabled(True)
-        self.all_btn.setEnabled(True)
 
     # ── Scale computation ─────────────────────────────────────────────────
     def _compute_dark_scale(self, pf, dark_dict: dict,
@@ -2458,7 +2474,8 @@ class DarkScalingTab(QWidget):
             self.manual_scale_spin.blockSignals(True)
             self.manual_scale_spin.setValue(float(saved_scale))
             self.manual_scale_spin.blockSignals(False)
-        self.all_btn.setEnabled(False)
+        # "Next Group" is available whenever there is a following group
+        self.all_btn.setEnabled(self._group_idx < len(self._groups) - 1)
 
     def set_power_filter(self, power: Optional[float]):
         """
@@ -2820,13 +2837,16 @@ class PowerPipelineTab(QWidget):
                  embedded_stitch_tab,             # StitchTab
                  auto_correct_fn,                 # () → None
                  get_pl_powers_fn,                # () → sorted list[float]
-                 get_corrected_fn,                # () → dict
+                 get_corrected_fn,                # () → dict {filename: df}
                  reset_scaling_fn,                # () → None
                  get_pl_dark_done_for_power_fn,   # (power: float) → bool
                  check_window_counts_fn=None,     # () → Optional[str] — error msg or None
                  replay_fn=None,                  # (json_path: str) → None
                  embedded_power_plot_tab=None,    # PowerSeriesPlotTab
                  get_correction_dict_fn=None,     # () → {ce: df} correction coefficients
+                 get_pl_files_fn=None,            # () → list[PL_file] raw PL files
+                 get_normalized_fn=None,          # () → {filename: df} dark-sub normalised
+                 silent_auto_correct_fn=None,     # () → None, no dialogs (for restore)
                  ):
         super().__init__()
 
@@ -2842,6 +2862,12 @@ class PowerPipelineTab(QWidget):
         self.replay_fn                      = replay_fn
         self.embedded_power_plot_tab        = embedded_power_plot_tab
         self.get_correction_dict_fn         = get_correction_dict_fn
+        self.get_pl_files_fn                = get_pl_files_fn
+        self.get_normalized_fn              = get_normalized_fn
+        self.silent_auto_correct_fn         = silent_auto_correct_fn
+        self.on_correction_applied          = None   # () → None; wired to _save_session
+        self._corr_view_mode: int           = 0   # 0=coefficients 1=raw 2=dark-sub 3=corrected
+        self._correction_applied: bool      = False  # persisted in session JSON
 
         self._pl_dark_powers: list = []
         self._pl_dark_idx:    int  = 0
@@ -3090,12 +3116,13 @@ class PowerPipelineTab(QWidget):
         self._corr_status.setWordWrap(True)
         lay.addWidget(self._corr_status)
 
+        btn_row = QHBoxLayout()
         self._run_corr_btn = QPushButton("Run Correction")
         self._run_corr_btn.setStyleSheet(
             "QPushButton { font-weight: bold; font-size: 12px; padding: 5px 18px; }"
         )
         self._run_corr_btn.clicked.connect(self._run_correction)
-        lay.addWidget(self._run_corr_btn)
+        btn_row.addWidget(self._run_corr_btn)
 
         self._corr_to_stitch_btn = QPushButton("✓ Correction Done — ④ Stitch ▶")
         self._corr_to_stitch_btn.setVisible(False)
@@ -3104,10 +3131,33 @@ class PowerPipelineTab(QWidget):
             "background-color: #1565c0; border-radius: 4px; padding: 5px 18px; }"
         )
         self._corr_to_stitch_btn.clicked.connect(self._goto_stitch)
-        lay.addWidget(self._corr_to_stitch_btn)
+        btn_row.addWidget(self._corr_to_stitch_btn)
+        btn_row.addStretch()
+        lay.addLayout(btn_row)
 
-        self._corr_coeff_plot = PlotWidget(min_h=380, log_y=True)
-        lay.addWidget(self._corr_coeff_plot, 1)
+        # ── View selector ────────────────────────────────────────────────
+        view_row = QHBoxLayout()
+        view_row.addWidget(QLabel("View:"))
+        self._corr_view_btns: list = []
+        _views = [
+            "Correction Coefficients",
+            "Raw PL Data",
+            "Dark-Subtracted & Normalised",
+            "Fully Corrected",
+        ]
+        for i, label in enumerate(_views):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setChecked(i == 0)
+            btn.clicked.connect(lambda _=False, idx=i: self._set_corr_view(idx))
+            self._corr_view_btns.append(btn)
+            view_row.addWidget(btn)
+        view_row.addStretch()
+        lay.addLayout(view_row)
+        self._update_corr_view_btn_styles()
+
+        self._corr_plot = PlotWidget(min_h=380, log_y=True)
+        lay.addWidget(self._corr_plot, 1)
         return page
 
     def _make_stitch_page(self) -> QWidget:
@@ -3151,8 +3201,14 @@ class PowerPipelineTab(QWidget):
 
         self._overview_status.setText("")
 
-        if self.get_corrected_fn():
-            self._goto_stitch()
+        if self._correction_applied or self.get_corrected_fn():
+            # Ensure correction is computed (may need re-applying after restart)
+            if not self.get_corrected_fn() and self.silent_auto_correct_fn:
+                try:
+                    self.silent_auto_correct_fn()
+                except Exception:
+                    pass
+            self._goto_correction()
             return
 
         pl_done_all = all(self.get_pl_dark_done_for_power_fn(p) for p in powers)
@@ -3330,20 +3386,30 @@ class PowerPipelineTab(QWidget):
         self._update_phase_labels(2)
         self._overview_btn.setVisible(True)
         self._stack.setCurrentIndex(self.PAGE_CORRECTION)
-        self._corr_to_stitch_btn.setVisible(False)
-        self._run_corr_btn.setEnabled(True)
-        self._corr_status.setText(
-            "Press 'Run Correction' to compute and apply whitelight correction."
-        )
+        already_done = bool(self.get_corrected_fn())
+        self._corr_to_stitch_btn.setVisible(already_done)
+        self._run_corr_btn.setEnabled(not already_done)
+        if already_done:
+            self._corr_status.setText(
+                "✓ Correction already applied.  Select a view or press ④ Stitch to continue."
+            )
+            self._update_corr_plot()
+        else:
+            self._corr_status.setText(
+                "Press 'Run Correction' to compute and apply whitelight correction."
+            )
 
     def _run_correction(self):
         try:
             self.auto_correct_fn()
             if self.get_corrected_fn():
+                self._correction_applied = True
+                if self.on_correction_applied:
+                    self.on_correction_applied()   # persists flag to session JSON
                 self._corr_status.setText("✓ Correction applied successfully.")
                 self._corr_to_stitch_btn.setVisible(True)
                 self._run_corr_btn.setEnabled(False)
-                self._plot_correction_coefficients()
+                self._update_corr_plot()
             else:
                 self._corr_status.setText(
                     "⚠  Correction failed — check that white files are loaded "
@@ -3352,27 +3418,162 @@ class PowerPipelineTab(QWidget):
         except Exception as exc:
             self._corr_status.setText(f"⚠  Error: {exc}")
 
-    def _plot_correction_coefficients(self):
-        """Plot the spectral correction coefficients after a successful correction run."""
-        if self.get_correction_dict_fn is None:
-            return
-        corr_dict = self.get_correction_dict_fn()
-        if not corr_dict:
-            return
-        series = [
-            (
-                df["Energy"].to_numpy(),
-                df["correction_coefficient"].to_numpy(),
-                f"Center_E = {ce:.3f} eV",
+    # ── Correction view helpers ───────────────────────────────────────────
+
+    _CORR_VIEW_STYLE_ACTIVE = (
+        "QPushButton { color: white; background-color: #1565c0; "
+        "border-radius: 4px; padding: 2px 10px; font-weight: bold; border: none; }"
+    )
+    _CORR_VIEW_STYLE_IDLE = (
+        "QPushButton { color: #555; border: 1px solid #bbb; "
+        "border-radius: 4px; padding: 2px 10px; background: transparent; }"
+        "QPushButton:hover { border-color: #888; color: #000; }"
+    )
+
+    def _update_corr_view_btn_styles(self):
+        for i, btn in enumerate(self._corr_view_btns):
+            btn.setStyleSheet(
+                self._CORR_VIEW_STYLE_ACTIVE if i == self._corr_view_mode
+                else self._CORR_VIEW_STYLE_IDLE
             )
-            for ce, df in sorted(corr_dict.items())
-        ]
-        self._corr_coeff_plot.plot_series(
-            series,
-            title="Spectral Correction Coefficients",
-            log_y=True,
-            ylabel="Correction coefficient",
-        )
+            btn.setChecked(i == self._corr_view_mode)
+
+    def _set_corr_view(self, mode: int):
+        self._corr_view_mode = mode
+        self._update_corr_view_btn_styles()
+        self._update_corr_plot()
+
+    def _update_corr_plot(self):
+        """Refresh the correction-page plot for the current view mode."""
+        mode = self._corr_view_mode
+
+        if mode == 0:
+            # ── Correction coefficients (one colour per CE) ───────────────
+            if self.get_correction_dict_fn is None:
+                return
+            corr_dict = self.get_correction_dict_fn()
+            if not corr_dict:
+                self._corr_plot.clear()
+                return
+            series = [
+                (df["Energy"].to_numpy(),
+                 df["correction_coefficient"].to_numpy(),
+                 f"Center_E = {ce:.3f} eV")
+                for ce, df in sorted(corr_dict.items())
+            ]
+            self._corr_plot.plot_series(
+                series, title="Correction Coefficients",
+                log_y=True, ylabel="Correction coefficient",
+            )
+
+        else:
+            # ── Modes 1/2/3: all windows of one power get the same colour ─
+            title_map = {
+                1: "Raw PL Data",
+                2: "Dark-Subtracted & Int.-Time Normalised",
+                3: "Fully Corrected (ready for stitching)",
+            }
+            ylabel_map = {1: "Counts", 2: "Counts / s", 3: "Counts (corrected)"}
+
+            pl_files = self.get_pl_files_fn() if self.get_pl_files_fn else []
+            meta = {pf.metadata["filename"]: pf.metadata for pf in pl_files}
+
+            # Collect (x, y, filename) triples for the chosen data source
+            items: list = []
+            if mode == 1:
+                if not pl_files:
+                    self._corr_plot.clear()
+                    return
+                for pf in pl_files:
+                    items.append((
+                        pf.df["Energy"].to_numpy(float),
+                        pf.df["Counts"].to_numpy(float),
+                        pf.metadata["filename"],
+                    ))
+            elif mode == 2:
+                if self.get_normalized_fn is None:
+                    self._corr_plot.clear()
+                    return
+                normalized = self.get_normalized_fn()
+                if not normalized:
+                    self._corr_plot.clear()
+                    return
+                for fname, df in normalized.items():
+                    items.append((
+                        df["Energy"].to_numpy(float),
+                        df["Counts"].to_numpy(float),
+                        fname,
+                    ))
+            elif mode == 3:
+                corrected = self.get_corrected_fn()
+                if not corrected:
+                    self._corr_plot.clear()
+                    return
+                for fname, df in corrected.items():
+                    items.append((
+                        df["Energy"].to_numpy(float),
+                        df["Counts"].to_numpy(float),
+                        fname,
+                    ))
+
+            # Build power groups using the same 10 % relative tolerance as
+            # the rest of the pipeline, then assign one colour per group.
+            raw_powers = [
+                meta.get(fname, {}).get("Exc_P")
+                for _, _, fname in items
+            ]
+            canonical: list = []   # one representative power per group
+            for p in raw_powers:
+                if p is None:
+                    continue
+                if not any(_powers_match(p, c) for c in canonical):
+                    canonical.append(p)
+            canonical.sort()
+
+            _COLOURS = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                "#bcbd22", "#17becf",
+            ]
+            # Map every raw power to its group's colour via _powers_match
+            def _colour_for(p):
+                if p is None:
+                    return "#333333"
+                for i, c in enumerate(canonical):
+                    if _powers_match(p, c):
+                        return _COLOURS[i % len(_COLOURS)]
+                return "#333333"
+
+            def _label_for(p):
+                if p is None:
+                    return None
+                for c in canonical:
+                    if _powers_match(p, c):
+                        return f"{c:.2f} mW"
+                return f"{p:.2f} mW"
+
+            ax = self._corr_plot.ax
+            ax.clear()
+            seen_labels: set = set()
+            for x, y, fname in items:
+                m     = meta.get(fname, {})
+                p     = m.get("Exc_P")
+                ce    = m.get("Center_E")
+                colour    = _colour_for(p)
+                lbl_power = _label_for(p) or fname
+                # Only the first curve of each power goes into the legend
+                legend_label = lbl_power if lbl_power not in seen_labels else ""
+                seen_labels.add(lbl_power)
+                y_plot = np.where(y > 0, y, np.nan)
+                ax.semilogy(x, y_plot, color=colour, lw=1, label=legend_label)
+
+            ax.set_xlabel("Energy (eV)")
+            ax.set_ylabel(ylabel_map[mode])
+            ax.set_title(title_map[mode])
+            if seen_labels:
+                ax.legend(fontsize=8)
+            self._corr_plot.figure.tight_layout()
+            self._corr_plot._safe_draw()
 
     # ── Phase 4: Stitch ───────────────────────────────────────────────────
 
@@ -3419,11 +3620,11 @@ class PowerPipelineTab(QWidget):
         stitched = (self.embedded_stitch_tab.stitched_results
                     or self.embedded_stitch_tab._power_stitched)
         return [
-            bool(self._pl_done) and all(self._pl_done.values()),  # ① PL Dark
-            self.embedded_wl_dark_tab.scaling_applied,             # ② White Dark
-            bool(self.get_corrected_fn()),                         # ③ Correction
-            bool(stitched),                                        # ④ Stitching
-            False,                                                 # ⑤ Power Plot
+            bool(self._pl_done) and all(self._pl_done.values()),       # ① PL Dark
+            self.embedded_wl_dark_tab.scaling_applied,                  # ② White Dark
+            self._correction_applied or bool(self.get_corrected_fn()),  # ③ Correction
+            bool(stitched),                                             # ④ Stitching
+            False,                                                      # ⑤ Power Plot
         ]
 
     def _update_phase_labels(self, active: int):
@@ -3455,8 +3656,9 @@ class PowerPipelineTab(QWidget):
         )
         if reply == QMessageBox.Yes:
             self.reset_scaling_fn()
-            self._pl_done     = {}
-            self._pip_ce_done = {}
+            self._pl_done              = {}
+            self._pip_ce_done          = {}
+            self._correction_applied   = False
             if self._pl_dark_pills:
                 self._update_pl_pill_colors()
             self._stack.setCurrentIndex(self.PAGE_OVERVIEW)
@@ -3484,6 +3686,12 @@ class PowerPipelineTab(QWidget):
                 self._rebuild_pl_pills()
             else:
                 self._update_pl_pill_colors()
+        # Refresh phase-label colours to reflect restored done state.
+        # Pass the currently active page index so the active label stays blue;
+        # pass -1 when on the overview so no label is highlighted.
+        current_page = self._stack.currentIndex()
+        active_phase = current_page - 1 if current_page > 0 else -1
+        self._update_phase_labels(active_phase)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -3497,6 +3705,23 @@ class StandardModeTab(QWidget):
     that MainWindow can still reference them directly for wiring.
     """
 
+    _TAB_LABELS = [
+        "① Dark Scaling (PL)",
+        "② Dark Scaling (White)",
+        "③ Apply Corrections",
+        "④ PL Analysis",
+        "⑤ Stitch & Export",
+        "⑥ Power Series Plot",
+    ]
+    # Tab index → label shown on the advance button
+    _NEXT_LABELS = {
+        0: "② Dark Scaling (White)",
+        1: "③ Apply Corrections",
+        2: "④ PL Analysis",
+        3: "⑤ Stitch & Export",
+        4: "⑥ Power Series Plot",
+    }
+
     def __init__(self,
                  dark_scaling_pl_tab,
                  dark_scaling_wl_tab,
@@ -3505,18 +3730,85 @@ class StandardModeTab(QWidget):
                  stitch_tab,
                  power_plot_tab):
         super().__init__()
+        self._dark_scaling_pl_tab = dark_scaling_pl_tab
+        self._dark_scaling_wl_tab = dark_scaling_wl_tab
+        self._corrections_tab     = corrections_tab
+        self._pl_tab              = pl_tab
+        self._stitch_tab          = stitch_tab
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # ── Header bar: blue "continue" button on the right ───────────────
+        hdr = QWidget()
+        hdr_lay = QHBoxLayout(hdr)
+        hdr_lay.setContentsMargins(4, 3, 4, 3)
+        hdr_lay.addStretch()
+        self._next_btn = QPushButton("")
+        self._next_btn.setStyleSheet(
+            "QPushButton { font-weight: bold; color: white; "
+            "background-color: #1565c0; border-radius: 4px; padding: 4px 16px; }"
+            "QPushButton:hover { background-color: #1976d2; }"
+        )
+        self._next_btn.setVisible(False)
+        self._next_btn.clicked.connect(self._advance_tab)
+        hdr_lay.addWidget(self._next_btn)
+        layout.addWidget(hdr)
 
         self.inner_tabs = QTabWidget()
-        self.inner_tabs.addTab(dark_scaling_pl_tab, "② Dark Scaling (PL)")
-        self.inner_tabs.addTab(dark_scaling_wl_tab, "③ Dark Scaling (White)")
-        self.inner_tabs.addTab(corrections_tab,     "④ Apply Corrections")
-        self.inner_tabs.addTab(pl_tab,              "⑤ PL Analysis")
-        self.inner_tabs.addTab(stitch_tab,          "⑥ Stitch && Export")
-        self.inner_tabs.addTab(power_plot_tab,      "⑦ Power Series Plot")
+        for label, tab in zip(self._TAB_LABELS, [
+            dark_scaling_pl_tab, dark_scaling_wl_tab, corrections_tab,
+            pl_tab, stitch_tab, power_plot_tab,
+        ]):
+            self.inner_tabs.addTab(tab, label)
+        layout.addWidget(self.inner_tabs, 1)
 
-        layout.addWidget(self.inner_tabs)
+        self.inner_tabs.currentChanged.connect(self.refresh_next_btn)
+
+    def _is_complete(self, idx: int) -> bool:
+        if idx == 0:
+            return self._dark_scaling_pl_tab.scaling_applied
+        if idx == 1:
+            return self._dark_scaling_wl_tab.scaling_applied
+        if idx == 2:
+            return bool(self._corrections_tab.correction_dict)
+        if idx == 3:
+            return bool(self._pl_tab.corrected)
+        if idx == 4:
+            return bool(
+                self._stitch_tab.stitched_results
+                or self._stitch_tab._power_stitched
+            )
+        return False  # last tab — no next
+
+    def refresh_next_btn(self):
+        idx = self.inner_tabs.currentIndex()
+        tab_bar = self.inner_tabs.tabBar()
+
+        # Colour completed tab labels green, reset others to default
+        for i in range(self.inner_tabs.count()):
+            if self._is_complete(i):
+                tab_bar.setTabTextColor(i, QColor("#2e7d32"))
+            else:
+                tab_bar.setTabTextColor(i, QColor())   # default (inherits palette)
+
+        # Show / hide the advance button
+        if idx >= self.inner_tabs.count() - 1:
+            self._next_btn.setVisible(False)
+            return
+        if self._is_complete(idx):
+            self._next_btn.setText(
+                f"▶  Continue to {self._NEXT_LABELS.get(idx, 'Next Step')}"
+            )
+            self._next_btn.setVisible(True)
+        else:
+            self._next_btn.setVisible(False)
+
+    def _advance_tab(self):
+        idx = self.inner_tabs.currentIndex()
+        if idx < self.inner_tabs.count() - 1:
+            self.inner_tabs.setCurrentIndex(idx + 1)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -3543,11 +3835,13 @@ class MainWindow(QMainWindow):
             self.calib_tab._save_session()
             self.std_corrections_tab.invalidate_dark_sub()
             self.std_pl_tab.invalidate()
+            self.standard_mode_tab.refresh_next_btn()
 
         def _on_std_wl_scaling_changed():
             self.calib_tab._save_session()
             self.std_corrections_tab.invalidate_correction()
             self.std_pl_tab.invalidate()
+            self.standard_mode_tab.refresh_next_btn()
 
         # ── Pipeline-mode invalidation callbacks ─────────────────────────────
         def _on_pip_pl_scaling_changed():
@@ -3635,6 +3929,9 @@ class MainWindow(QMainWindow):
             stitch_tab          = self.std_stitch_tab,
             power_plot_tab      = self.std_power_plot_tab,
         )
+        self.std_corrections_tab.on_data_changed = self.standard_mode_tab.refresh_next_btn
+        self.std_pl_tab.on_data_changed          = self.standard_mode_tab.refresh_next_btn
+        self.std_stitch_tab.on_stitching_done    = self.standard_mode_tab.refresh_next_btn
 
         # ════════════════════════════════════════════════════════════════════
         # PIPELINE MODE TABS  (all embedded inside PowerPipelineTab)
@@ -3696,12 +3993,48 @@ class MainWindow(QMainWindow):
 
         # ── Helper closures for the pipeline ─────────────────────────────────
         def _pipeline_auto_correct_and_apply():
+            """User-triggered: uses the standard tab methods (with their UI feedback)."""
             self.pipeline_corrections_tab._build_correction()
             if not self.pipeline_corrections_tab.correction_dict:
                 return
             self.pipeline_corrections_tab._apply_dark_sub()
+            self.pipeline_pl_tab.refresh_table()
             self.pipeline_pl_tab.pl_table.check_all(True)
             self.pipeline_pl_tab._apply_checked()
+
+        def _pipeline_auto_correct_silent():
+            """Session-restore: same computation but no QMessageBox dialogs."""
+            pl_files  = self.calib_tab.checked_pl_files()
+            dark_dict = self.calib_tab.checked_dark_dict()
+            halogen   = self.calib_tab.halogen_df
+            white_dict = self.calib_tab.checked_white_dict()
+            if not pl_files or not dark_dict or halogen is None or not white_dict:
+                return
+            dsd = self._pipeline_dark_dict
+            # Dark subtraction
+            self.pipeline_corrections_tab.normalized.clear()
+            for pf in pl_files:
+                try:
+                    self.pipeline_corrections_tab.normalized[pf.metadata["filename"]] = \
+                        pf.subtract_dark_and_normalize(dark_dict, dsd)
+                except Exception:
+                    pass
+            # Correction ratios
+            ratios, hard_errors, _ = build_correction_ratios(
+                white_dict, dark_dict, halogen, dsd)
+            if hard_errors or not ratios:
+                return
+            self.pipeline_corrections_tab.correction_dict.clear()
+            self.pipeline_corrections_tab.correction_dict.update(ratios)
+            # Apply correction
+            self.pipeline_pl_tab.corrected.clear()
+            for pf in pl_files:
+                try:
+                    self.pipeline_pl_tab.corrected[pf.metadata["filename"]] = \
+                        apply_correction(pf, dark_dict,
+                                         self.pipeline_corrections_tab.correction_dict, dsd)
+                except Exception:
+                    pass
 
         def _get_pl_powers():
             pl_files = self.calib_tab.checked_pl_files()
@@ -3824,12 +4157,15 @@ class MainWindow(QMainWindow):
             replay_fn                      = self._pipeline_replay_from_json,
             embedded_power_plot_tab        = self.pipeline_power_plot_tab,
             get_correction_dict_fn         = lambda: self.pipeline_corrections_tab.correction_dict,
+            get_pl_files_fn                = lambda: self.calib_tab.checked_pl_files(),
+            get_normalized_fn              = lambda: self.pipeline_corrections_tab.normalized,
+            silent_auto_correct_fn         = _pipeline_auto_correct_silent,
         )
 
         # ── Three top-level tabs ──────────────────────────────────────────────
         tabs.addTab(self.calib_tab,          "① Load Files")
         tabs.addTab(self.pipeline_tab,       "② Power-by-Power Pipeline")
-        tabs.addTab(self.standard_mode_tab,  "③ Standard Analysis")
+        tabs.addTab(self.standard_mode_tab,  "③ Automatic Analysis")
 
         self.setCentralWidget(tabs)
 
@@ -3886,7 +4222,8 @@ class MainWindow(QMainWindow):
         self.calib_tab.get_pip_wl_done_groups    = lambda: self.pipeline_wl_dark_tab._externally_done
         self.calib_tab.get_pip_dark_scales       = lambda: self._pipeline_dark_dict
         self.calib_tab.get_pip_power_stitch_logs = lambda: self.pipeline_stitch_tab._power_blend_logs
-        self.calib_tab.get_pip_ce_done           = lambda: self.pipeline_tab._pip_ce_done
+        self.calib_tab.get_pip_ce_done              = lambda: self.pipeline_tab._pip_ce_done
+        self.calib_tab.get_pip_correction_applied   = lambda: self.pipeline_tab._correction_applied
 
         # ── Session restore ───────────────────────────────────────────────────
         # WL done-groups are restored BEFORE _ingest_pl so that the _save_session
@@ -3924,6 +4261,11 @@ class MainWindow(QMainWindow):
                 self.calib_tab._restored_pip_pl_done_groups)
         self.pipeline_pl_dark_tab.refresh_if_needed()
         self.pipeline_wl_dark_tab.refresh_if_needed()
+
+        # Restore the correction-applied flag so phase ③ shows green immediately.
+        # The actual re-computation is deferred to when the user presses Start Pipeline.
+        if getattr(self.calib_tab, "_restored_pip_correction_applied", False):
+            self.pipeline_tab._correction_applied = True
 
         # Re-save once so the session file reflects the fully-restored state.
         # Without this, saves that occurred during _ingest_pl (before done-groups
