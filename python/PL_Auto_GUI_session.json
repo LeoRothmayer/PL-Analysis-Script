@@ -1,0 +1,275 @@
+{
+  "halogen_path": "//nas.ads.mwn.de/tuze/wsi/e24/SQN/Researchers/Rothmayer, Leopold/03_Analysis/06_PL/PL-Analysis-Script/example_data/HalogenLamp_Spectrum.txt",
+  "dark_paths": [
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.1s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.2s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.3s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.4s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.5s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.6s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.7s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.8s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_0.9s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_1.0s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_1.5s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_2.0s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_3.0s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_4.0s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.15eV_5.0s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.1s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.2s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.3s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.4s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.5s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.6s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.7s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.8s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_0.9s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_1.0s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_1.5s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_2.0s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_3.0s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_4.0s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\dark\\dark_1.3eV_5.0s_000.origin"
+  ],
+  "white_paths": [
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\Whitelight\\whitelight_1.15eV_0.4s_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\Whitelight\\whitelight_1.3eV_0.4s_002.origin"
+  ],
+  "pl_paths": [
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_000.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_001.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_002.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_003.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_004.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_005.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_006.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_007.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_008.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_009.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_010.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_011.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_012.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_013.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_014.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_015.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_016.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_017.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_018.origin",
+    "\\\\nas.ads.mwn.de\\tuze\\wsi\\e24\\SQN\\Researchers\\Rothmayer, Leopold\\03_Analysis\\06_PL\\PL-Analysis-Script\\example_data\\PL\\EPI-2061_reference_019.origin"
+  ],
+  "white_scales": {},
+  "standard": {
+    "dark_scales": {
+      "EPI-2061_reference_000.origin": 1.0209338048797914,
+      "EPI-2061_reference_003.origin": 0.9046410932954467,
+      "EPI-2061_reference_004.origin": 1.0541053056284042,
+      "EPI-2061_reference_007.origin": 1.043217286914766,
+      "EPI-2061_reference_008.origin": 1.3673469387755104,
+      "EPI-2061_reference_011.origin": 0.9262859014961232,
+      "EPI-2061_reference_012.origin": 0.8153514279274928,
+      "EPI-2061_reference_015.origin": 0.7920833067957455,
+      "EPI-2061_reference_016.origin": 0.8027832622125979,
+      "EPI-2061_reference_019.origin": 0.8003311890962359,
+      "EPI-2061_reference_001.origin": 1.0073260073260073,
+      "EPI-2061_reference_002.origin": 0.8153443766346992,
+      "EPI-2061_reference_005.origin": 0.9627798195790178,
+      "EPI-2061_reference_006.origin": 0.9818499596665771,
+      "EPI-2061_reference_009.origin": 1.4766109045848823,
+      "EPI-2061_reference_010.origin": 1.18045693115159,
+      "EPI-2061_reference_013.origin": 1.5081815375115775,
+      "EPI-2061_reference_014.origin": 1.5553411546773694,
+      "EPI-2061_reference_017.origin": 1.177723275707364,
+      "EPI-2061_reference_018.origin": 0.9502901238260454
+    },
+    "pl_done_groups": [
+      1.15,
+      1.3
+    ],
+    "wl_done_groups": [],
+    "power_stitch_blend_logs": {}
+  },
+  "pipeline": {
+    "dark_scales": {
+      "EPI-2061_reference_001.origin": 1.0142732401934444,
+      "EPI-2061_reference_002.origin": 0.80816696,
+      "EPI-2061_reference_005.origin": 0.97406801,
+      "EPI-2061_reference_006.origin": 0.96946373,
+      "EPI-2061_reference_009.origin": 1.48647638,
+      "EPI-2061_reference_010.origin": 1.18625124,
+      "EPI-2061_reference_013.origin": 1.52804688,
+      "EPI-2061_reference_014.origin": 1.56774818,
+      "EPI-2061_reference_017.origin": 1.17711318,
+      "EPI-2061_reference_018.origin": 0.95558153,
+      "EPI-2061_reference_000.origin": 1.021397018221977,
+      "EPI-2061_reference_003.origin": 0.90286915,
+      "EPI-2061_reference_004.origin": 1.05802449,
+      "EPI-2061_reference_007.origin": 1.04309153,
+      "EPI-2061_reference_008.origin": 1.36256283,
+      "EPI-2061_reference_011.origin": 0.93304629,
+      "EPI-2061_reference_012.origin": 0.81808553,
+      "EPI-2061_reference_015.origin": 0.79791561,
+      "EPI-2061_reference_016.origin": 0.81010697,
+      "EPI-2061_reference_019.origin": 0.80618457,
+      "whitelight_1.15eV_0.4s_000.origin": 1.38970195,
+      "whitelight_1.3eV_0.4s_002.origin": 1.09058888
+    },
+    "pl_done_groups": [
+      1.15,
+      1.3
+    ],
+    "wl_done_groups": [
+      1.15,
+      1.3
+    ],
+    "power_stitch_blend_logs": {
+      "1.1000": [
+        {
+          "step": 1,
+          "left_center_E": 1.15,
+          "right_center_E": 1.3,
+          "window_eV": [
+            1.171609,
+            1.180385
+          ],
+          "ratios_by_power": {
+            "1.1000": 0.7784554
+          }
+        }
+      ],
+      "2.2200": [
+        {
+          "step": 1,
+          "left_center_E": 1.15,
+          "right_center_E": 1.3,
+          "window_eV": [
+            1.175231,
+            1.183529
+          ],
+          "ratios_by_power": {
+            "2.2200": 0.77782835
+          }
+        }
+      ],
+      "5.2500": [
+        {
+          "step": 1,
+          "left_center_E": 1.15,
+          "right_center_E": 1.3,
+          "window_eV": [
+            1.180385,
+            1.191355
+          ],
+          "ratios_by_power": {
+            "5.2500": 0.78066646
+          }
+        }
+      ],
+      "10.4400": [
+        {
+          "step": 1,
+          "left_center_E": 1.15,
+          "right_center_E": 1.3,
+          "window_eV": [
+            1.177956,
+            1.181705
+          ],
+          "ratios_by_power": {
+            "10.4400": 0.78224538
+          }
+        }
+      ],
+      "18.0800": [
+        {
+          "step": 1,
+          "left_center_E": 1.15,
+          "right_center_E": 1.3,
+          "window_eV": [
+            1.189747,
+            1.1925
+          ],
+          "ratios_by_power": {
+            "18.0800": 0.80432819
+          }
+        }
+      ],
+      "30.0400": [
+        {
+          "step": 1,
+          "left_center_E": 1.15,
+          "right_center_E": 1.3,
+          "window_eV": [
+            1.196056,
+            1.197654
+          ],
+          "ratios_by_power": {
+            "30.0400": 0.80345085
+          }
+        }
+      ],
+      "46.6800": [
+        {
+          "step": 1,
+          "left_center_E": 1.15,
+          "right_center_E": 1.3,
+          "window_eV": [
+            1.175433,
+            1.182455
+          ],
+          "ratios_by_power": {
+            "46.6800": 0.7915353
+          }
+        }
+      ],
+      "68.9200": [
+        {
+          "step": 1,
+          "left_center_E": 1.15,
+          "right_center_E": 1.3,
+          "window_eV": [
+            1.188692,
+            1.19348
+          ],
+          "ratios_by_power": {
+            "68.9200": 0.8027544
+          }
+        }
+      ],
+      "88.4200": [
+        {
+          "step": 1,
+          "left_center_E": 1.15,
+          "right_center_E": 1.3,
+          "window_eV": [
+            1.192366,
+            1.19912
+          ],
+          "ratios_by_power": {
+            "88.4200": 0.80894393
+          }
+        }
+      ],
+      "100.7500": [
+        {
+          "step": 1,
+          "left_center_E": 1.15,
+          "right_center_E": 1.3,
+          "window_eV": [
+            1.182769,
+            1.190681
+          ],
+          "ratios_by_power": {
+            "100.7500": 0.79758183
+          }
+        }
+      ]
+    },
+    "pip_ce_done": {
+      "1.1000": {
+        "1.1500": true,
+        "1.3000": true
+      }
+    },
+    "correction_applied": false
+  }
+}

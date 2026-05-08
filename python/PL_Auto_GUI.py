@@ -15,8 +15,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# Fix "Could not find Qt platform plugin 'windows'" when Qt's self-configuration
-# fails (common on network drives or in certain conda/venv setups).
 try:
     import PySide6 as _pyside6
     _plugin_path = str(Path(_pyside6.__file__).parent / "plugins" / "platforms")
