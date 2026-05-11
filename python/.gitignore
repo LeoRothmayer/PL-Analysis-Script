@@ -1,6 +1,6 @@
 .vscode
-.json
-.png
-.pdf
+*.json
+*.png
+*.pdf
 .origin
 .claude
