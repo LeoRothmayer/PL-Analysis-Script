@@ -90,9 +90,9 @@ def _rx_float(pattern: str, text: str, group: int = 1) -> Optional[float]:
     return float(m.group(group)) if m else None
 
 
-def _pick_folder_origin_files(parent, title: str) -> list:
+def _pick_folder_origin_files(parent, title: str, start_dir: str = "") -> list:
     """Open a folder dialog and return all *.origin files in it (non-recursive)."""
-    folder = QFileDialog.getExistingDirectory(parent, title)
+    folder = QFileDialog.getExistingDirectory(parent, title, start_dir)
     if not folder:
         return []
     return sorted(str(p) for p in Path(folder).glob("*.origin"))
@@ -539,6 +539,8 @@ class CalibrationTab(QWidget):
         self._white_row_map: list = []   # [(ce, it), …] parallel to white_table rows
         # Set by MainWindow after downstream tabs are created:
         self.on_pl_files_changed = None   # callable() → refresh PLAnalysisTab table
+        # Remembered last-used directories — persisted in session JSON.
+        self._last_dirs: dict = {"load": "", "save": "", "replay": ""}
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -668,6 +670,19 @@ class CalibrationTab(QWidget):
         self.on_replay_requested           = None   # (json_path: str) → triggers MainWindow replay
         self._restore_session()
 
+    # ── Directory memory helpers ─────────────────────────────────────────────
+    def _get_last_dir(self, category: str) -> str:
+        """Return the last-used directory for the given category ("load"/"save"/"replay")."""
+        return self._last_dirs.get(category, "")
+
+    def _set_last_dir(self, category: str, path: str):
+        """Update the remembered directory from a selected file/folder path and save."""
+        p = Path(path)
+        new_dir = str(p.parent if p.is_file() else p)
+        if new_dir and self._last_dirs.get(category) != new_dir:
+            self._last_dirs[category] = new_dir
+            self._save_session()
+
     # ── Session control ──────────────────────────────────────────────────────
     def _new_session(self):
         """Clear all loaded files (dark, white, PL). Halogen reference is kept."""
@@ -685,11 +700,14 @@ class CalibrationTab(QWidget):
 
     def _request_replay(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select PL analysis JSON", "",
+            self, "Select PL analysis JSON",
+            self._get_last_dir("replay"),
             "JSON files (*.json);;All files (*)"
         )
-        if path and self.on_replay_requested:
-            self.on_replay_requested(path)
+        if path:
+            self._set_last_dir("replay", path)
+            if self.on_replay_requested:
+                self.on_replay_requested(path)
 
     # ── Session persistence ──────────────────────────────────────────────────
     def _session_path(self) -> Path:
@@ -730,6 +748,7 @@ class CalibrationTab(QWidget):
         try:
             self._session_path().write_text(json.dumps({
                 "halogen_path": self._halogen_path,
+                "last_dirs":    self._last_dirs,
                 "dark_paths":   dark_paths,
                 "white_paths":  white_paths,
                 "pl_paths":     pl_paths,
@@ -809,6 +828,13 @@ class CalibrationTab(QWidget):
                 if fname in white_scales:
                     pf.scale = float(white_scales[fname])
 
+        # Last-used directories
+        saved_dirs = data.get("last_dirs", {})
+        for key in ("load", "save", "replay"):
+            d = saved_dirs.get(key, "")
+            if d and Path(d).is_dir():
+                self._last_dirs[key] = d
+
         # PL files — deferred until MainWindow calls _ingest_pl
         self._restored_pl_paths = [fp for fp in data.get("pl_paths", []) if Path(fp).exists()]
 
@@ -860,10 +886,12 @@ class CalibrationTab(QWidget):
     # ── Halogen ──────────────────────────────────────────────────────────────
     def _load_halogen(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select HalogenLamp_Spectrum.txt", "",
+            self, "Select HalogenLamp_Spectrum.txt",
+            self._get_last_dir("load"),
             "Text files (*.txt);;All files (*)"
         )
         if path:
+            self._set_last_dir("load", path)
             self._do_load_halogen(path)
 
     def _do_load_halogen(self, path: str, silent: bool = False):
@@ -892,13 +920,19 @@ class CalibrationTab(QWidget):
 
     def _load_dark_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select Dark Files", "",
+            self, "Select Dark Files",
+            self._get_last_dir("load"),
             "Origin files (*.origin);;All files (*)"
         )
+        if paths:
+            self._set_last_dir("load", paths[0])
         self._ingest_dark(paths)
 
     def _load_dark_folder(self):
-        self._ingest_dark(_pick_folder_origin_files(self, "Select Dark Folder"))
+        files = _pick_folder_origin_files(self, "Select Dark Folder", self._get_last_dir("load"))
+        if files:
+            self._set_last_dir("load", files[0])
+        self._ingest_dark(files)
 
     def _clear_dark(self):
         self.dark_dict.clear()
@@ -940,13 +974,19 @@ class CalibrationTab(QWidget):
 
     def _load_white_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select White-Light Files", "",
+            self, "Select White-Light Files",
+            self._get_last_dir("load"),
             "Origin files (*.origin);;All files (*)"
         )
+        if paths:
+            self._set_last_dir("load", paths[0])
         self._ingest_white(paths)
 
     def _load_white_folder(self):
-        self._ingest_white(_pick_folder_origin_files(self, "Select White Folder"))
+        files = _pick_folder_origin_files(self, "Select White Folder", self._get_last_dir("load"))
+        if files:
+            self._set_last_dir("load", files[0])
+        self._ingest_white(files)
 
     def _clear_white(self):
         self.white_dict.clear()
@@ -993,13 +1033,19 @@ class CalibrationTab(QWidget):
 
     def _load_pl_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select PL Measurement Files", "",
+            self, "Select PL Measurement Files",
+            self._get_last_dir("load"),
             "Origin files (*.origin);;All files (*)"
         )
+        if paths:
+            self._set_last_dir("load", paths[0])
         self._ingest_pl(paths)
 
     def _load_pl_folder(self):
-        self._ingest_pl(_pick_folder_origin_files(self, "Select PL Folder"))
+        files = _pick_folder_origin_files(self, "Select PL Folder", self._get_last_dir("load"))
+        if files:
+            self._set_last_dir("load", files[0])
+        self._ingest_pl(files)
 
     def _clear_pl(self):
         self.pl_files.clear()
@@ -1469,7 +1515,8 @@ class StitchTab(QWidget):
     def __init__(self, get_corrected_grouped,
                  get_scaling_applied_pl, get_scaling_applied_wl,
                  get_correction_dict, get_corrected,
-                 get_pl_scaling_meta=None, get_wl_scaling_meta=None):
+                 get_pl_scaling_meta=None, get_wl_scaling_meta=None,
+                 get_save_dir=None, set_save_dir=None):
         super().__init__()
         self.get_corrected_grouped  = get_corrected_grouped
         self.get_scaling_applied_pl = get_scaling_applied_pl
@@ -1478,12 +1525,15 @@ class StitchTab(QWidget):
         self.get_corrected          = get_corrected
         self.get_pl_scaling_meta    = get_pl_scaling_meta or (lambda: {})
         self.get_wl_scaling_meta    = get_wl_scaling_meta or (lambda: {})
+        self.get_save_dir           = get_save_dir or (lambda: "")
+        self.set_save_dir           = set_save_dir or (lambda _: None)
 
         self.on_stitching_done = None   # () → None; called when all stitching is complete
 
         # ── State ─────────────────────────────────────────────────────────
-        self.power_groups:     dict = {}   # {power: [(df, pf), …]}
-        self.stitched_results: dict = {}   # {power: df}
+        self.power_groups:          dict = {}   # {power: [(df, pf), …]}
+        self.stitched_results:      dict = {}   # {power: df}
+        self._single_window_groups: dict = {}   # {power: [(df, pf)]} — 1-window powers, auto-completed
         self.n_steps:          int  = 0
         self.current_step:     int  = 0
         self._selected_range:  Optional[tuple] = None
@@ -1669,13 +1719,69 @@ class StitchTab(QWidget):
         temp_str = f"{temp:.1f}" if temp is not None else "None"
         return f"{name}_{power:.2f}mW_stitched_{temp_str}K"
 
+    # ── Reset ─────────────────────────────────────────────────────────────
+    def reset(self):
+        """Fully reset all stitching state so a fresh analysis can start."""
+        self._clear_span()
+        self.power_groups          = {}
+        self.stitched_results      = {}
+        self._single_window_groups = {}
+        self.n_steps               = 0
+        self.current_step          = 0
+        self._selected_range       = None
+        self._blend_log            = []
+        self._power_mode           = False
+        self._power_order          = []
+        self._power_idx            = 0
+        self._power_done           = {}
+        self._power_stitched       = {}
+        self._power_blend_logs     = {}
+        self._power_groups_all     = {}
+
+        self.do_btn.setEnabled(False)
+        self.restart_btn.setEnabled(False)
+        self.save_btn.setEnabled(False)
+        self._prev_power_btn.setVisible(False)
+        self._next_power_btn.setVisible(False)
+        self._redo_power_btn.setVisible(False)
+        self._power_pills_widget.setVisible(False)
+        while self._power_pills_layout.count():
+            item = self._power_pills_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._power_pills = {}
+        self.plot.clear()
+        self.step_label.setText("—")
+        self.range_label.setText("")
+        self.status.setText("")
+
     # ── Workflow ──────────────────────────────────────────────────────────
     def _start(self):
         groups = self.get_corrected_grouped()
-        groups_ok = {p: pfs for p, pfs in groups.items() if len(pfs) >= 2}
-        if not groups_ok:
+        if not groups:
             QMessageBox.warning(self, "Not enough data",
-                "Need at least 2 checked spectral windows per power level.")
+                "No corrected files found.")
+            return
+
+        # Powers with a single window need no stitching — auto-complete them.
+        self._single_window_groups = {p: pfs for p, pfs in groups.items() if len(pfs) == 1}
+        groups_ok                  = {p: pfs for p, pfs in groups.items() if len(pfs) >= 2}
+
+        self.stitched_results = {p: pfs[0][0].copy() for p, pfs in self._single_window_groups.items()}
+
+        if not groups_ok:
+            # Every power has exactly one spectral window — nothing to stitch interactively.
+            self.power_groups = {}
+            self.n_steps      = 0
+            self.save_btn.setEnabled(True)
+            self.restart_btn.setEnabled(False)
+            n_g = len(self._single_window_groups)
+            self.status.setText(
+                f"{n_g} power group(s) — single spectral window each, no stitching needed.  "
+                "Press 'Save All' to export."
+            )
+            if self.on_stitching_done:
+                self.on_stitching_done()
             return
 
         sizes = {p: len(pfs) for p, pfs in groups_ok.items()}
@@ -1689,18 +1795,19 @@ class StitchTab(QWidget):
                 "All groups must have the same number of spectral windows.")
             return
 
-        self.power_groups     = groups_ok
-        self.n_steps          = list(set(sizes.values()))[0] - 1
-        self.current_step     = 0
-        self._blend_log       = []
-        self.stitched_results = {
-            p: pfs[0][0].copy() for p, pfs in groups_ok.items()
-        }
+        self.power_groups = groups_ok
+        self.n_steps      = list(set(sizes.values()))[0] - 1
+        self.current_step = 0
+        self._blend_log   = []
+        for p, pfs in groups_ok.items():
+            self.stitched_results[p] = pfs[0][0].copy()
         self._show_step()
         self.restart_btn.setEnabled(True)
-        n_g = len(groups_ok)
+        n_g   = len(groups_ok)
+        extra = (f"  ({len(self._single_window_groups)} single-window power(s) auto-completed.)"
+                 if self._single_window_groups else "")
         self.status.setText(
-            f"{n_g} power group(s) ready.  "
+            f"{n_g} power group(s) ready.{extra}  "
             "Click and drag to select blend window, then press 'Do Stitch'."
         )
 
@@ -1873,10 +1980,10 @@ class StitchTab(QWidget):
         Returns True if there are corrected groups to stitch.
         """
         groups = self.get_corrected_grouped()
-        groups_ok = {p: pfs for p, pfs in groups.items() if len(pfs) >= 2}
+        groups_ok = {p: pfs for p, pfs in groups.items() if len(pfs) >= 1}
         if not groups_ok:
             QMessageBox.warning(self, "Not enough data",
-                "Need at least 2 checked spectral windows per power level.")
+                "No corrected files found.")
             return False
 
         powers = sorted(groups_ok.keys())
@@ -1909,16 +2016,26 @@ class StitchTab(QWidget):
         if not self.enter_power_mode():
             return
         groups = self.get_corrected_grouped()
-        for power, log in sorted(blend_logs.items()):
-            pfs = groups.get(power, [])
-            if len(pfs) < 2 or not log:
+        for json_power, log in sorted(blend_logs.items()):
+            # Match the JSON power to the actual loaded power using the same
+            # 10 % relative tolerance used everywhere else in the pipeline.
+            actual_power = next(
+                (p for p in groups if _powers_match(p, json_power)), None
+            )
+            if actual_power is None or len(groups[actual_power]) < 2 or not log:
                 continue
-            # Replay blend windows for this power
-            self.power_groups = {power: pfs}
+            pfs = groups[actual_power]
+            # Point _power_idx at the correct slot so _do_stitch stores
+            # the result under the right key in _power_stitched.
+            if actual_power in self._power_order:
+                self._power_idx = self._power_order.index(actual_power)
+            # Set up stitching state for this power
+            self._power_groups_all[actual_power] = pfs
+            self.power_groups = {actual_power: pfs}
             self.n_steps = len(pfs) - 1
             self.current_step = 0
             self._blend_log = []
-            self.stitched_results = {power: pfs[0][0].copy()}
+            self.stitched_results = {actual_power: pfs[0][0].copy()}
             for entry in sorted(log, key=lambda e: e.get("step", 0)):
                 xmin, xmax = entry.get("window_eV", [0, 0])
                 self._selected_range = (xmin, xmax)
@@ -1959,9 +2076,33 @@ class StitchTab(QWidget):
         power = self._power_order[self._power_idx]
         pfs = groups.get(power, [])
         if len(pfs) < 2:
-            self.status.setText(
-                f"{power:.2f} mW: need ≥2 spectral windows to stitch."
-            )
+            # Single-window power — auto-complete without any user interaction.
+            self._power_groups_all[power] = pfs
+            if pfs:
+                self._power_stitched[power] = pfs[0][0].copy()
+            self._power_done[power] = True
+            self._power_blend_logs[power] = []
+            self._update_power_pills()
+            if self._save_power_progress:
+                self._save_power_progress()
+            n_done  = sum(1 for v in self._power_done.values() if v)
+            n_total = len(self._power_order)
+            if n_done == n_total:
+                self.save_btn.setEnabled(True)
+                self.status.setText(
+                    f"All {n_total} power(s) complete!  Press 'Save All' to export."
+                )
+                if self.on_stitching_done:
+                    self.on_stitching_done()
+            else:
+                next_undone = next((p for p in self._power_order if not self._power_done.get(p)), None)
+                self.status.setText(
+                    f"{power:.2f} mW: single window, auto-completed  "
+                    f"({n_done}/{n_total})."
+                )
+                if next_undone is not None:
+                    self._power_idx = self._power_order.index(next_undone)
+                    self._start_current_power()
             return
 
         self._power_groups_all[power] = pfs
@@ -2113,9 +2254,12 @@ class StitchTab(QWidget):
                 "Check at least one output format (DAT / JSON).")
             return
 
-        folder = QFileDialog.getExistingDirectory(self, "Select output folder")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select output folder", self.get_save_dir()
+        )
         if not folder:
             return
+        self.set_save_dir(folder)
         out = Path(folder)
 
         # Create per-format subfolders up-front
@@ -2130,6 +2274,8 @@ class StitchTab(QWidget):
                 pf_list = [pf for _, pf in self._power_groups_all[power]]
             elif power in self.power_groups:
                 pf_list = [pf for _, pf in self.power_groups[power]]
+            elif power in self._single_window_groups:
+                pf_list = [pf for _, pf in self._single_window_groups[power]]
             else:
                 pf_list = []
             if not pf_list:
@@ -2151,8 +2297,10 @@ class StitchTab(QWidget):
                 meta = self._build_metadata()
                 # Build name from sample + date: e.g. GaAs_sample_PL_analysis_2026-04-16.json
                 sample_name = "unknown"
-                if self.power_groups:
-                    first_pfs = next(iter(self.power_groups.values()))
+                ref_groups = (self.power_groups or self._power_groups_all
+                              or self._single_window_groups)
+                if ref_groups:
+                    first_pfs = next(iter(ref_groups.values()))
                     fp = first_pfs[0][1].file_path.replace("\\", "/")
                     m  = re.search(r"/([^/]+)_\d{1,3}\.origin$", fp)
                     sample_name = m.group(1) if m else Path(first_pfs[0][1].file_path).stem
@@ -2845,6 +2993,8 @@ class PowerPipelineTab(QWidget):
                  get_pl_files_fn=None,            # () → list[PL_file] raw PL files
                  get_normalized_fn=None,          # () → {filename: df} dark-sub normalised
                  silent_auto_correct_fn=None,     # () → None, no dialogs (for restore)
+                 get_replay_dir=None,             # () → str
+                 set_replay_dir=None,             # (path: str) → None
                  ):
         super().__init__()
 
@@ -2860,6 +3010,8 @@ class PowerPipelineTab(QWidget):
         self.replay_fn                      = replay_fn
         self.embedded_power_plot_tab        = embedded_power_plot_tab
         self.get_correction_dict_fn         = get_correction_dict_fn
+        self.get_replay_dir                 = get_replay_dir or (lambda: "")
+        self.set_replay_dir                 = set_replay_dir or (lambda _: None)
         self.get_pl_files_fn                = get_pl_files_fn
         self.get_normalized_fn              = get_normalized_fn
         self.silent_auto_correct_fn         = silent_auto_correct_fn
@@ -3659,6 +3811,7 @@ class PowerPipelineTab(QWidget):
             self._correction_applied   = False
             if self._pl_dark_pills:
                 self._update_pl_pill_colors()
+            self.embedded_stitch_tab.reset()
             self._stack.setCurrentIndex(self.PAGE_OVERVIEW)
             self._overview_btn.setVisible(False)
             self._update_phase_labels(-1)
@@ -3667,11 +3820,14 @@ class PowerPipelineTab(QWidget):
 
     def _request_replay(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select pipeline analysis JSON", "",
+            self, "Select pipeline analysis JSON",
+            self.get_replay_dir(),
             "JSON files (*.json);;All files (*)"
         )
-        if path and self.replay_fn:
-            self.replay_fn(path)
+        if path:
+            self.set_replay_dir(path)
+            if self.replay_fn:
+                self.replay_fn(path)
 
     # ══ Called when this tab becomes visible ═══════════════════════════════
 
@@ -3907,6 +4063,8 @@ class MainWindow(QMainWindow):
             get_corrected=lambda: self.std_pl_tab.corrected,
             get_pl_scaling_meta=lambda: self.std_dark_scaling_pl_tab.get_scaling_meta(),
             get_wl_scaling_meta=lambda: self.std_dark_scaling_wl_tab.get_scaling_meta(),
+            get_save_dir=lambda: self.calib_tab._get_last_dir("save"),
+            set_save_dir=lambda p: self.calib_tab._set_last_dir("save", p),
         )
 
         def _std_get_stitched_for_plot():
@@ -3916,6 +4074,8 @@ class MainWindow(QMainWindow):
 
         self.std_power_plot_tab = PowerSeriesPlotTab(
             get_stitched_results=_std_get_stitched_for_plot,
+            get_save_dir=lambda: self.calib_tab._get_last_dir("save"),
+            set_save_dir=lambda p: self.calib_tab._set_last_dir("save", p),
         )
 
         # Container that nests all standard-mode tabs in an inner QTabWidget
@@ -3978,6 +4138,8 @@ class MainWindow(QMainWindow):
             get_corrected=lambda: self.pipeline_pl_tab.corrected,
             get_pl_scaling_meta=lambda: self.pipeline_pl_dark_tab.get_scaling_meta(),
             get_wl_scaling_meta=lambda: self.pipeline_wl_dark_tab.get_scaling_meta(),
+            get_save_dir=lambda: self.calib_tab._get_last_dir("save"),
+            set_save_dir=lambda p: self.calib_tab._set_last_dir("save", p),
         )
 
         def _pip_get_stitched_for_plot():
@@ -3987,6 +4149,8 @@ class MainWindow(QMainWindow):
 
         self.pipeline_power_plot_tab = PowerSeriesPlotTab(
             get_stitched_results=_pip_get_stitched_for_plot,
+            get_save_dir=lambda: self.calib_tab._get_last_dir("save"),
+            set_save_dir=lambda p: self.calib_tab._set_last_dir("save", p),
         )
 
         # ── Helper closures for the pipeline ─────────────────────────────────
@@ -4158,6 +4322,8 @@ class MainWindow(QMainWindow):
             get_pl_files_fn                = lambda: self.calib_tab.checked_pl_files(),
             get_normalized_fn              = lambda: self.pipeline_corrections_tab.normalized,
             silent_auto_correct_fn         = _pipeline_auto_correct_silent,
+            get_replay_dir                 = lambda: self.calib_tab._get_last_dir("replay"),
+            set_replay_dir                 = lambda p: self.calib_tab._set_last_dir("replay", p),
         )
 
         # ── Three top-level tabs ──────────────────────────────────────────────
@@ -4309,26 +4475,25 @@ class MainWindow(QMainWindow):
         if self.calib_tab.halogen_df is None:
             missing.append("• Halogen lamp reference not loaded")
 
-        loaded_pl_by_ce: dict = {}
-        for pf in self.calib_tab.pl_files:
-            ce = pf.metadata.get("Center_E")
-            if ce is not None:
-                loaded_pl_by_ce.setdefault(ce, []).append(pf)
-        for ce_str in meta.get("pl_dark_scaling", {}):
-            ce = float(ce_str)
-            if not loaded_pl_by_ce.get(ce):
-                missing.append(f"• No PL file loaded for Center_E = {ce:.4f} eV")
+        # Validate by filename (path-independent — works across computers).
+        # The JSON stores every measured file's filename in dark_scale_by_file.
+        expected_pl_fnames: set = set()
+        for grp in meta.get("pl_dark_scaling", {}).values():
+            expected_pl_fnames.update(grp.get("dark_scale_by_file", {}).keys())
+        loaded_pl_fnames = {pf.metadata["filename"] for pf in self.calib_tab.pl_files}
+        for fname in sorted(expected_pl_fnames - loaded_pl_fnames):
+            missing.append(f"• PL file not loaded: {fname}")
 
-        loaded_white_by_ce: dict = {}
-        for td in self.calib_tab.white_dict.values():
-            for pf in td.values():
-                ce = pf.metadata.get("Center_E")
-                if ce is not None:
-                    loaded_white_by_ce.setdefault(ce, []).append(pf)
-        for ce_str in meta.get("white_dark_scaling", {}):
-            ce = float(ce_str)
-            if not loaded_white_by_ce.get(ce):
-                missing.append(f"• No white file loaded for Center_E = {ce:.4f} eV")
+        expected_wl_fnames: set = set()
+        for grp in meta.get("white_dark_scaling", {}).values():
+            expected_wl_fnames.update(grp.get("dark_scale_by_file", {}).keys())
+        loaded_wl_fnames = {
+            pf.metadata["filename"]
+            for td in self.calib_tab.white_dict.values()
+            for pf in td.values()
+        }
+        for fname in sorted(expected_wl_fnames - loaded_wl_fnames):
+            missing.append(f"• White file not loaded: {fname}")
 
         dark_dict = self.calib_tab.checked_dark_dict()
         for ce_str in meta.get("pl_dark_scaling", {}):
@@ -4462,26 +4627,24 @@ class MainWindow(QMainWindow):
         if self.calib_tab.halogen_df is None:
             missing.append("• Halogen lamp reference not loaded")
 
-        loaded_pl_by_ce: dict = {}
-        for pf in self.calib_tab.pl_files:
-            ce = pf.metadata.get("Center_E")
-            if ce is not None:
-                loaded_pl_by_ce.setdefault(ce, []).append(pf)
-        for ce_str in meta.get("pl_dark_scaling", {}):
-            ce = float(ce_str)
-            if not loaded_pl_by_ce.get(ce):
-                missing.append(f"• No PL file loaded for Center_E = {ce:.4f} eV")
+        # Validate by filename (path-independent — works across computers).
+        expected_pl_fnames: set = set()
+        for grp in meta.get("pl_dark_scaling", {}).values():
+            expected_pl_fnames.update(grp.get("dark_scale_by_file", {}).keys())
+        loaded_pl_fnames = {pf.metadata["filename"] for pf in self.calib_tab.pl_files}
+        for fname in sorted(expected_pl_fnames - loaded_pl_fnames):
+            missing.append(f"• PL file not loaded: {fname}")
 
-        loaded_white_by_ce: dict = {}
-        for td in self.calib_tab.white_dict.values():
-            for pf in td.values():
-                ce = pf.metadata.get("Center_E")
-                if ce is not None:
-                    loaded_white_by_ce.setdefault(ce, []).append(pf)
-        for ce_str in meta.get("white_dark_scaling", {}):
-            ce = float(ce_str)
-            if not loaded_white_by_ce.get(ce):
-                missing.append(f"• No white file loaded for Center_E = {ce:.4f} eV")
+        expected_wl_fnames: set = set()
+        for grp in meta.get("white_dark_scaling", {}).values():
+            expected_wl_fnames.update(grp.get("dark_scale_by_file", {}).keys())
+        loaded_wl_fnames = {
+            pf.metadata["filename"]
+            for td in self.calib_tab.white_dict.values()
+            for pf in td.values()
+        }
+        for fname in sorted(expected_wl_fnames - loaded_wl_fnames):
+            missing.append(f"• White file not loaded: {fname}")
 
         dark_dict = self.calib_tab.checked_dark_dict()
         for ce_str in meta.get("pl_dark_scaling", {}):
@@ -4555,6 +4718,11 @@ class MainWindow(QMainWindow):
                 "Whitelight correction produced no results.")
             return
 
+        # Mark correction as applied so phase ③ shows green and state persists.
+        self.pipeline_tab._correction_applied = True
+        if self.pipeline_tab.on_correction_applied:
+            self.pipeline_tab.on_correction_applied()   # saves session
+
         # ── 6. Stitch with recorded blend windows ─────────────────────────────
         # Prefer per-power blend logs (power-mode JSON); fall back to flat list.
         power_groups_data = meta.get("stitching", {}).get("power_groups", {})
@@ -4613,7 +4781,31 @@ class MainWindow(QMainWindow):
                     f"All {len(flat_bw)} stitch step(s) replayed successfully.\n"
                     "Review the result and press 'Save All' to export.")
 
-        # ── 7. Navigate pipeline to stitch page ──────────────────────────────
+        # ── 7. Update pipeline phase indicators ──────────────────────────────
+        # Build the list of unique power levels from loaded PL files.
+        pl_files = self.calib_tab.checked_pl_files()
+        powers_list: list = []
+        for pf in pl_files:
+            p = pf.metadata.get("Exc_P")
+            if p is not None and not any(_powers_match(p, q) for q in powers_list):
+                powers_list.append(p)
+        powers_list.sort()
+
+        # Populate _pip_ce_done so get_pl_dark_done_for_power_fn returns True.
+        # All CEs present in pl_dark_scaling were scaled; mark them done for
+        # every power so that refresh_status() correctly sets _pl_done to True.
+        scaled_ces = {float(ce_str) for ce_str in meta.get("pl_dark_scaling", {})}
+        if powers_list and scaled_ces:
+            self.pipeline_tab._pip_ce_done = {
+                p: {ce: True for ce in scaled_ces} for p in powers_list
+            }
+
+        # Now refresh_status can evaluate _pl_done correctly.
+        self.pipeline_tab.refresh_status()
+        # Save final state so the replay is fully persisted.
+        self.calib_tab._save_session()
+
+        # ── 8. Navigate pipeline to stitch page ──────────────────────────────
         self.tabs.setCurrentWidget(self.pipeline_tab)
         self.pipeline_tab._goto_stitch()
 
@@ -4637,9 +4829,11 @@ class PowerSeriesPlotTab(QWidget):
     then save the figure as PNG and/or SVG at 300 dpi.
     """
 
-    def __init__(self, get_stitched_results):
+    def __init__(self, get_stitched_results, get_save_dir=None, set_save_dir=None):
         super().__init__()
         self.get_stitched_results = get_stitched_results  # () -> dict {power: df}
+        self.get_save_dir         = get_save_dir or (lambda: "")
+        self.set_save_dir         = set_save_dir or (lambda _: None)
 
         # ── Figure ────────────────────────────────────────────────────────
         self.figure = Figure(figsize=(8, 5), tight_layout=True)
@@ -4817,9 +5011,12 @@ class PowerSeriesPlotTab(QWidget):
             return
 
         out_dir = QFileDialog.getExistingDirectory(
-            self, "Select output folder", str(Path.cwd()))
+            self, "Select output folder",
+            self.get_save_dir() or str(Path.cwd())
+        )
         if not out_dir:
             return
+        self.set_save_dir(out_dir)
 
         # Re-render fresh so the saved file matches what's on screen
         ok = self._build_figure()
