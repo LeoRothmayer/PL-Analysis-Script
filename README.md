@@ -23,7 +23,7 @@ The mathematical/functional basis of this script was written by myself, the GUI 
 
 ### II. Power-by-Power Pipeline
 
-Main focus and recommended workflow. Fully guided 5-phase pipeline — dark scaling per power level, white-light dark scaling, automatic spectral correction with interactive plot views, power-by-power stitching, and a publication-ready power-series plot. All progress is auto-saved and restored on restart.
+Main focus and recommended workflow. Fully guided 6-phase pipeline — dark scaling per power level, white-light dark scaling, automatic spectral correction with interactive plot views, power-by-power stitching, a publication-ready power-series plot, and a multi-format export tab. All progress is auto-saved and fully restored on restart (including stitched results).
 
 ### III. Automatic Analysis
 

@@ -41,10 +41,13 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSlider,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -53,6 +56,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+try:
+    from scipy.signal import savgol_filter as _savgol_filter
+    _SCIPY_AVAILABLE = True
+except ImportError:
+    _SCIPY_AVAILABLE = False
 
 # ── Physical constants ──────────────────────────────────────────────────────
 HC_EV_NM = 1239.84193
@@ -2955,6 +2964,511 @@ class DarkScalingTab(QWidget):
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# Export Tab — multi-format export with optional Savitzky-Golay smoothing
+# ════════════════════════════════════════════════════════════════════════════
+class ExportTab(QWidget):
+    """
+    Export raw, dark-subtracted, whitelight-corrected, and stitched spectra.
+
+    File format: one Energy column + one column per selected format, all
+    interpolated onto a shared x-axis that is the union of ALL energy points
+    across all formats for the given power (full spectrum, no truncation).
+    Smoothing parameters are written into the file header.
+
+    UI state is intentionally NOT saved to the session JSON.
+    """
+
+    _COLOURS = [
+        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+        "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+        "#bcbd22", "#17becf",
+    ]
+    # (linestyle, linewidth, alpha) per column name keyword
+    _LINE_STYLE = {
+        "Raw":            (":",  1.0, 0.7),
+        "DarkSub":        ("--", 1.0, 0.8),
+        "WL_corrected":   ("-.", 1.0, 0.8),
+        "Stitched_smooth":("-",  2.0, 1.0),
+        "Stitched":       ("--", 1.5, 0.55),  # dashed so smooth stands out
+    }
+
+    def __init__(self, get_pl_files_fn, get_normalized_fn, get_corrected_fn,
+                 get_stitched_fn, get_save_dir=None, set_save_dir=None):
+        super().__init__()
+        self.get_pl_files_fn   = get_pl_files_fn
+        self.get_normalized_fn = get_normalized_fn
+        self.get_corrected_fn  = get_corrected_fn
+        self.get_stitched_fn   = get_stitched_fn
+        self.get_save_dir      = get_save_dir or (lambda: "")
+        self.set_save_dir      = set_save_dir or (lambda _: None)
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(6, 6, 6, 6)
+        root.setSpacing(8)
+
+        # ── Left control panel ────────────────────────────────────────
+        left = QWidget()
+        left.setFixedWidth(290)
+        lv = QVBoxLayout(left)
+        lv.setContentsMargins(0, 0, 0, 0)
+        lv.setSpacing(6)
+
+        # Power selector (multi-select)
+        pw_box = QGroupBox("Power levels")
+        pb = QVBoxLayout(pw_box)
+        pw_btns = QHBoxLayout()
+        sel_all_btn = QPushButton("All")
+        sel_none_btn = QPushButton("None")
+        sel_all_btn.setMaximumWidth(50)
+        sel_none_btn.setMaximumWidth(50)
+        sel_all_btn.clicked.connect(self._select_all_powers)
+        sel_none_btn.clicked.connect(self._deselect_all_powers)
+        pw_btns.addWidget(QLabel("Select:"))
+        pw_btns.addWidget(sel_all_btn)
+        pw_btns.addWidget(sel_none_btn)
+        pw_btns.addStretch()
+        pb.addLayout(pw_btns)
+        self._power_list = QListWidget()
+        self._power_list.setMaximumHeight(110)
+        self._power_list.itemChanged.connect(self._refresh_preview)
+        pb.addWidget(self._power_list)
+        lv.addWidget(pw_box)
+
+        # Format checkboxes
+        fmt_box = QGroupBox("Data to include")
+        fb = QVBoxLayout(fmt_box)
+        self._chk_raw     = QCheckBox("Raw PL data")
+        self._chk_darksub = QCheckBox("Dark-subtracted & normalised")
+        self._chk_corr    = QCheckBox("Whitelight corrected")
+        self._chk_stitch  = QCheckBox("Stitched data")
+        self._chk_smooth  = QCheckBox("Smoothed stitched data")
+        self._chk_stitch.setChecked(True)
+        self._chk_smooth.setChecked(True)
+        for chk in [self._chk_raw, self._chk_darksub, self._chk_corr,
+                    self._chk_stitch, self._chk_smooth]:
+            fb.addWidget(chk)
+            chk.toggled.connect(self._refresh_preview)
+        lv.addWidget(fmt_box)
+
+        # Smoothing controls
+        sm_box = QGroupBox("Smoothing (Savitzky-Golay)")
+        sv = QVBoxLayout(sm_box)
+        if not _SCIPY_AVAILABLE:
+            sv.addWidget(QLabel("⚠  scipy not installed — using\nmoving-average fallback."))
+
+        sv.addWidget(QLabel("Window length (points):"))
+        win_row = QHBoxLayout()
+        self._win_slider = QSlider(Qt.Horizontal)
+        self._win_slider.setRange(1, 50)   # slider n → window 2n+1
+        self._win_slider.setValue(5)       # default: 11 pts
+        self._win_label = QLabel("11")
+        self._win_label.setFixedWidth(28)
+        win_row.addWidget(self._win_slider)
+        win_row.addWidget(self._win_label)
+        sv.addLayout(win_row)
+
+        sv.addWidget(QLabel("Polynomial order:"))
+        poly_row = QHBoxLayout()
+        self._poly_slider = QSlider(Qt.Horizontal)
+        self._poly_slider.setRange(1, 5)
+        self._poly_slider.setValue(3)
+        self._poly_label = QLabel("3")
+        self._poly_label.setFixedWidth(20)
+        poly_row.addWidget(self._poly_slider)
+        poly_row.addWidget(self._poly_label)
+        sv.addLayout(poly_row)
+
+        self._win_slider.valueChanged.connect(self._on_slider_changed)
+        self._poly_slider.valueChanged.connect(self._on_slider_changed)
+        lv.addWidget(sm_box)
+
+        # Save scope
+        scope_box = QGroupBox("Save scope")
+        scb = QVBoxLayout(scope_box)
+
+        scb.addWidget(QLabel("Powers:"))
+        self._save_selected_rb = QCheckBox("Selected powers only")
+        self._save_all_rb      = QCheckBox("All powers")
+        self._save_all_rb.setChecked(True)
+        scb.addWidget(self._save_selected_rb)
+        scb.addWidget(self._save_all_rb)
+        self._save_selected_rb.toggled.connect(
+            lambda c: self._save_all_rb.setChecked(not c) if c else None)
+        self._save_all_rb.toggled.connect(
+            lambda c: self._save_selected_rb.setChecked(not c) if c else None)
+
+        scb.addWidget(QLabel("Formats:"))
+        self._save_fmt_preview_rb = QCheckBox("Shown in preview")
+        self._save_fmt_all_rb     = QCheckBox("All available")
+        self._save_fmt_preview_rb.setChecked(True)
+        scb.addWidget(self._save_fmt_preview_rb)
+        scb.addWidget(self._save_fmt_all_rb)
+        self._save_fmt_preview_rb.toggled.connect(
+            lambda c: self._save_fmt_all_rb.setChecked(not c) if c else None)
+        self._save_fmt_all_rb.toggled.connect(
+            lambda c: self._save_fmt_preview_rb.setChecked(not c) if c else None)
+
+        lv.addWidget(scope_box)
+
+        self._save_btn = QPushButton("Save …")
+        self._save_btn.setStyleSheet(
+            "QPushButton { font-weight: bold; font-size: 12px; padding: 5px; }"
+        )
+        self._save_btn.clicked.connect(self._save)
+        lv.addWidget(self._save_btn)
+
+        # Axis limits
+        lim_box = QGroupBox("Axis limits  (empty = auto)")
+        lb = QVBoxLayout(lim_box)
+        x_row = QHBoxLayout()
+        x_row.addWidget(QLabel("x:"))
+        self._xmin_edit = QLineEdit(); self._xmin_edit.setPlaceholderText("min")
+        self._xmax_edit = QLineEdit(); self._xmax_edit.setPlaceholderText("max")
+        self._xmin_edit.setMaximumWidth(70); self._xmax_edit.setMaximumWidth(70)
+        x_row.addWidget(self._xmin_edit); x_row.addWidget(QLabel("–")); x_row.addWidget(self._xmax_edit)
+        lb.addLayout(x_row)
+        y_row = QHBoxLayout()
+        y_row.addWidget(QLabel("y:"))
+        self._ymin_edit = QLineEdit(); self._ymin_edit.setPlaceholderText("min")
+        self._ymax_edit = QLineEdit(); self._ymax_edit.setPlaceholderText("max")
+        self._ymin_edit.setMaximumWidth(70); self._ymax_edit.setMaximumWidth(70)
+        y_row.addWidget(self._ymin_edit); y_row.addWidget(QLabel("–")); y_row.addWidget(self._ymax_edit)
+        lb.addLayout(y_row)
+        apply_lim_btn = QPushButton("Apply limits")
+        apply_lim_btn.clicked.connect(self._refresh_preview)
+        lb.addWidget(apply_lim_btn)
+        lv.addWidget(lim_box)
+
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        self._status.setStyleSheet("color: #555;")
+        lv.addWidget(self._status)
+        lv.addStretch()
+        root.addWidget(left)
+
+        # ── Right: preview plot ───────────────────────────────────────
+        self._plot = PlotWidget(min_h=420, log_y=True)
+        root.addWidget(self._plot, 1)
+
+    # ── Properties ────────────────────────────────────────────────────
+
+    def _window_length(self) -> int:
+        return self._win_slider.value() * 2 + 1
+
+    def _on_slider_changed(self):
+        wl = self._window_length()
+        po = self._poly_slider.value()
+        self._win_label.setText(str(wl))
+        self._poly_label.setText(str(po))
+        if po >= wl:
+            self._poly_slider.blockSignals(True)
+            self._poly_slider.setValue(max(1, wl - 1))
+            self._poly_slider.blockSignals(False)
+            self._poly_label.setText(str(max(1, wl - 1)))
+        if self._chk_smooth.isChecked():
+            self._refresh_preview()
+
+    # ── Power list helpers ────────────────────────────────────────────
+
+    def _available_powers(self) -> list:
+        powers: list = []
+        for p in (self.get_stitched_fn() or {}):
+            if not any(_powers_match(p, q) for q in powers):
+                powers.append(p)
+        if not powers:
+            for pf in (self.get_pl_files_fn() or []):
+                p = pf.metadata.get("Exc_P")
+                if p is not None and not any(_powers_match(p, q) for q in powers):
+                    powers.append(p)
+        return sorted(powers)
+
+    def _selected_powers(self) -> list:
+        result = []
+        for i in range(self._power_list.count()):
+            item = self._power_list.item(i)
+            if item.checkState() == Qt.Checked:
+                result.append(item.data(Qt.UserRole))
+        return result
+
+    def _select_all_powers(self):
+        self._power_list.blockSignals(True)
+        for i in range(self._power_list.count()):
+            self._power_list.item(i).setCheckState(Qt.Checked)
+        self._power_list.blockSignals(False)
+        self._refresh_preview()
+
+    def _deselect_all_powers(self):
+        self._power_list.blockSignals(True)
+        for i in range(self._power_list.count()):
+            self._power_list.item(i).setCheckState(Qt.Unchecked)
+        self._power_list.blockSignals(False)
+        self._refresh_preview()
+
+    # ── Data collection ───────────────────────────────────────────────
+
+    def _build_columns(self, power: float, force_all: bool = False) -> tuple:
+        """
+        Return (x_ref, col_dict) for a single power.
+
+        x_ref is the union of ALL energy points from all selected formats
+        (raw, dark-sub, corrected, stitched) — the full spectrum from every
+        window, not just the stitched portion.
+
+        force_all=True ignores the preview checkboxes and builds every format
+        that has data (used when "All available" is selected for saving).
+        """
+        pl_files = self.get_pl_files_fn() or []
+        meta = {pf.metadata["filename"]: pf.metadata for pf in pl_files}
+
+        stitched  = self.get_stitched_fn() or {}
+        stitch_key = next((p for p in stitched if _powers_match(p, power)), None)
+        stitch_df  = stitched.get(stitch_key) if stitch_key is not None else None
+
+        want_raw    = force_all or self._chk_raw.isChecked()
+        want_darksub = force_all or self._chk_darksub.isChecked()
+        want_corr   = force_all or self._chk_corr.isChecked()
+        want_stitch = force_all or self._chk_stitch.isChecked()
+        want_smooth = force_all or self._chk_smooth.isChecked()
+
+        # Build full x-axis: union of ALL relevant data points
+        x_parts: list = []
+        if want_raw or want_darksub or want_corr:
+            for pf in pl_files:
+                if pf.metadata.get("Exc_P") is not None and _powers_match(pf.metadata["Exc_P"], power):
+                    x_parts.append(pf.df["Energy"].to_numpy(float))
+        if (want_stitch or want_smooth) and stitch_df is not None:
+            x_parts.append(stitch_df["Energy"].to_numpy(float))
+        if not x_parts:
+            return np.array([]), {}
+        x_ref = np.sort(np.unique(np.concatenate(x_parts)))
+        if len(x_ref) < 2:
+            return x_ref, {}
+
+        def _cat_interp(data_iter) -> Optional[np.ndarray]:
+            xs_all, ys_all = [], []
+            for x, y in data_iter:
+                xs_all.append(x); ys_all.append(y)
+            if not xs_all:
+                return None
+            xc = np.concatenate(xs_all); yc = np.concatenate(ys_all)
+            ord_ = np.argsort(xc)
+            return np.interp(x_ref, xc[ord_], yc[ord_])
+
+        def _file_pairs(src_dict):
+            for fname, df in (src_dict or {}).items():
+                m = meta.get(fname, {})
+                p = m.get("Exc_P")
+                if p is not None and _powers_match(p, power):
+                    yield (df["Energy"].to_numpy(float), df.iloc[:, 1].to_numpy(float))
+
+        cols: dict = {}
+
+        if want_raw:
+            y = _cat_interp(
+                (pf.df["Energy"].to_numpy(float), pf.df["Counts"].to_numpy(float))
+                for pf in pl_files
+                if pf.metadata.get("Exc_P") is not None
+                and _powers_match(pf.metadata["Exc_P"], power)
+            )
+            if y is not None:
+                cols["Raw_counts"] = y
+
+        if want_darksub:
+            y = _cat_interp(_file_pairs(self.get_normalized_fn()))
+            if y is not None:
+                cols["DarkSub_norm"] = y
+
+        if want_corr:
+            y = _cat_interp(_file_pairs(self.get_corrected_fn()))
+            if y is not None:
+                cols["WL_corrected"] = y
+
+        if want_stitch and stitch_df is not None:
+            xs = stitch_df["Energy"].to_numpy(float); ys = stitch_df["Counts"].to_numpy(float)
+            cols["Stitched"] = np.interp(x_ref, xs, ys)
+
+        if want_smooth and stitch_df is not None:
+            xs = stitch_df["Energy"].to_numpy(float); ys = stitch_df["Counts"].to_numpy(float)
+            y_s = np.interp(x_ref, xs, ys)
+            wl = self._window_length(); po = self._poly_slider.value()
+            if _SCIPY_AVAILABLE and wl <= len(y_s) and po < wl:
+                y_s = _savgol_filter(y_s, wl, po)
+            else:
+                kernel = np.ones(min(wl, len(y_s))) / min(wl, len(y_s))
+                y_s = np.convolve(y_s, kernel, mode="same")
+            cols["Stitched_smooth"] = y_s
+
+        return x_ref, cols
+
+    # ── UI updates ────────────────────────────────────────────────────
+
+    def refresh(self):
+        """Rebuild the power list (preserve checked state) and refresh preview."""
+        powers = self._available_powers()
+        # Remember which powers were checked
+        prev_checked = set()
+        for i in range(self._power_list.count()):
+            item = self._power_list.item(i)
+            if item.checkState() == Qt.Checked:
+                prev_checked.add(item.data(Qt.UserRole))
+
+        self._power_list.blockSignals(True)
+        self._power_list.clear()
+        for p in powers:
+            item = QListWidgetItem(f"{p:.2f} mW")
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+            # Default: check all; restore previous state if available
+            was_checked = not prev_checked or any(_powers_match(p, q) for q in prev_checked)
+            item.setCheckState(Qt.Checked if was_checked else Qt.Unchecked)
+            item.setData(Qt.UserRole, p)
+            self._power_list.addItem(item)
+        self._power_list.blockSignals(False)
+        self._refresh_preview()
+
+    def _refresh_preview(self):
+        sel = self._selected_powers()
+        if not sel:
+            self._plot.clear()
+            self._status.setText("No powers selected.")
+            return
+
+        ax = self._plot.ax
+        ax.clear()
+        any_data = False
+        for p_idx, power in enumerate(sel):
+            colour = self._COLOURS[p_idx % len(self._COLOURS)]
+            x_ref, cols = self._build_columns(power)
+            if not cols:
+                continue
+            any_data = True
+            for col_name, y in cols.items():
+                ls, lw, alpha = next(
+                    (v for k, v in self._LINE_STYLE.items() if col_name.startswith(k)),
+                    ("-", 1.0, 0.9),
+                )
+                y_plot = np.where(y > 0, y, np.nan)
+                ax.semilogy(x_ref, y_plot, color=colour, ls=ls, lw=lw, alpha=alpha,
+                            label=f"{power:.2f} mW — {col_name}")
+        ax.set_xlabel("Energy (eV)")
+        ax.set_ylabel("Intensity")
+        title = "Export preview"
+        if len(sel) == 1:
+            title += f" — {sel[0]:.2f} mW"
+        ax.set_title(title)
+        if any_data:
+            ax.legend(fontsize=7)
+
+        # Apply axis limits
+        def _parse(edit) -> Optional[float]:
+            txt = edit.text().strip()
+            try:
+                return float(txt) if txt else None
+            except ValueError:
+                return None
+        xmin, xmax = _parse(self._xmin_edit), _parse(self._xmax_edit)
+        ymin, ymax = _parse(self._ymin_edit), _parse(self._ymax_edit)
+        if xmin is not None or xmax is not None:
+            ax.set_xlim(
+                xmin if xmin is not None else ax.get_xlim()[0],
+                xmax if xmax is not None else ax.get_xlim()[1],
+            )
+        if ymin is not None or ymax is not None:
+            ax.set_ylim(
+                ymin if ymin is not None else ax.get_ylim()[0],
+                ymax if ymax is not None else ax.get_ylim()[1],
+            )
+
+        self._plot.figure.tight_layout()
+        self._plot._safe_draw()
+
+        if not any_data:
+            self._status.setText("No data for selected powers — run correction/stitching first.")
+        else:
+            self._status.setText(f"{len(sel)} power(s) selected")
+
+    # ── Save ──────────────────────────────────────────────────────────
+
+    def _save(self):
+        if self._save_selected_rb.isChecked():
+            powers_to_save = self._selected_powers()
+        else:
+            powers_to_save = self._available_powers()
+        force_all_formats = self._save_fmt_all_rb.isChecked()
+
+        if not powers_to_save:
+            QMessageBox.warning(self, "No data", "No data available to save.")
+            return
+
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select output folder", self.get_save_dir()
+        )
+        if not folder:
+            return
+        self.set_save_dir(folder)
+        out = Path(folder)
+
+        wl = self._window_length()
+        po = self._poly_slider.value()
+        saved, errors = [], []
+
+        for power in powers_to_save:
+            x_ref, cols = self._build_columns(power, force_all=force_all_formats)
+            if not cols:
+                continue
+
+            pl_files = self.get_pl_files_fn() or []
+            pf0 = next(
+                (pf for pf in pl_files
+                 if pf.metadata.get("Exc_P") is not None
+                 and _powers_match(pf.metadata["Exc_P"], power)),
+                None,
+            )
+            if pf0:
+                fp     = pf0.file_path.replace("\\", "/")
+                m_name = re.search(r"/([^/]+)_\d{1,3}\.origin$", fp)
+                sample = m_name.group(1) if m_name else Path(pf0.file_path).stem
+                temp   = pf0.metadata.get("Temp")
+                temp_s = f"{temp:.1f}" if temp is not None else "?"
+            else:
+                sample, temp_s = "sample", "?"
+
+            fname = f"{sample}_{power:.2f}mW_export_{temp_s}K.dat"
+            fpath = out / fname
+
+            col_names = ["Energy(eV)"] + list(cols.keys())
+            try:
+                with open(fpath, "w", encoding="utf-8") as fh:
+                    fh.write(f"# Sample: {sample}\n")
+                    fh.write(f"# Temperature: {temp_s} K\n")
+                    fh.write(f"# Power: {power:.4f} mW\n")
+                    if "Stitched_smooth" in cols:
+                        method = "Savitzky-Golay" if _SCIPY_AVAILABLE else "moving-average"
+                        fh.write(
+                            f"# Smoothing: {method}, window={wl} pts, poly_order={po}\n"
+                        )
+                    fh.write("# Columns: " + " | ".join(col_names) + "\n")
+                    fh.write("\t".join(col_names) + "\n")
+                    ys_list = list(cols.values())
+                    for i, x in enumerate(x_ref):
+                        row = [f"{x:.6f}"] + [
+                            f"{y[i]:.6e}" if np.isfinite(y[i]) else "NaN"
+                            for y in ys_list
+                        ]
+                        fh.write("\t".join(row) + "\n")
+                saved.append(fname)
+            except Exception as exc:
+                errors.append(f"{fname}: {exc}")
+
+        msg = f"Saved {len(saved)} file(s) to {out.name}/"
+        if saved:
+            msg += "\n\n" + "\n".join(saved)
+        if errors:
+            msg += "\n\nErrors:\n" + "\n".join(errors)
+        QMessageBox.information(self, "Export complete", msg)
+        self._status.setText(f"Saved {len(saved)} file(s).")
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # TAB 8 — Power-by-Power Pipeline
 # ════════════════════════════════════════════════════════════════════════════
 class PowerPipelineTab(QWidget):
@@ -2974,8 +3488,9 @@ class PowerPipelineTab(QWidget):
     PAGE_PL_DARK    = 1
     PAGE_WL_DARK    = 2
     PAGE_CORRECTION = 3
-    PAGE_STITCH      = 4
-    PAGE_POWER_PLOT  = 5
+    PAGE_STITCH     = 4
+    PAGE_POWER_PLOT = 5
+    PAGE_EXPORT     = 6
 
     def __init__(self,
                  embedded_pl_dark_tab,            # DarkScalingTab(mode="pl")
@@ -2995,6 +3510,7 @@ class PowerPipelineTab(QWidget):
                  silent_auto_correct_fn=None,     # () → None, no dialogs (for restore)
                  get_replay_dir=None,             # () → str
                  set_replay_dir=None,             # (path: str) → None
+                 embedded_export_tab=None,        # ExportTab
                  ):
         super().__init__()
 
@@ -3012,6 +3528,7 @@ class PowerPipelineTab(QWidget):
         self.get_correction_dict_fn         = get_correction_dict_fn
         self.get_replay_dir                 = get_replay_dir or (lambda: "")
         self.set_replay_dir                 = set_replay_dir or (lambda _: None)
+        self.embedded_export_tab            = embedded_export_tab
         self.get_pl_files_fn                = get_pl_files_fn
         self.get_normalized_fn              = get_normalized_fn
         self.silent_auto_correct_fn         = silent_auto_correct_fn
@@ -3044,6 +3561,7 @@ class PowerPipelineTab(QWidget):
             ("③ Correction", lambda: self._goto_correction()),
             ("④ Stitching",  lambda: self._goto_stitch()),
             ("⑤ Power Plot", lambda: self._goto_power_plot()),
+            ("⑥ Export",     lambda: self._goto_export()),
         ]
         for txt, nav_fn in _phase_nav:
             btn = QPushButton(txt)
@@ -3083,6 +3601,8 @@ class PowerPipelineTab(QWidget):
         self._stack.addWidget(self._make_stitch_page())     # 4
         if self.embedded_power_plot_tab is not None:
             self._stack.addWidget(self._make_power_plot_page())  # 5
+        if self.embedded_export_tab is not None:
+            self._stack.addWidget(self._make_export_page())      # 6
 
         # ── Hook into embedded tab callbacks for auto-advance ─────────────
         _orig_pl_cb = self.embedded_pl_dark_tab.on_data_changed
@@ -3358,7 +3878,13 @@ class PowerPipelineTab(QWidget):
                     self.silent_auto_correct_fn()
                 except Exception:
                     pass
-            self._goto_correction()
+            # If stitching was already done (restored from session), jump to stitch
+            stitched = (self.embedded_stitch_tab.stitched_results
+                        or self.embedded_stitch_tab._power_stitched)
+            if stitched:
+                self._goto_stitch()
+            else:
+                self._goto_correction()
             return
 
         pl_done_all = all(self.get_pl_dark_done_for_power_fn(p) for p in powers)
@@ -3759,8 +4285,42 @@ class PowerPipelineTab(QWidget):
         back_btn = QPushButton("◀ Back to Stitch")
         back_btn.clicked.connect(lambda: self._stack.setCurrentIndex(self.PAGE_STITCH))
         hdr_lay.addWidget(back_btn)
+        if self.embedded_export_tab is not None:
+            to_export_btn = QPushButton("⑥ Export →")
+            to_export_btn.setStyleSheet(
+                "QPushButton { font-weight: bold; color: white; "
+                "background-color: #00695c; border-radius: 4px; padding: 3px 10px; }"
+                "QPushButton:hover { background-color: #00796b; }"
+            )
+            to_export_btn.clicked.connect(self._goto_export)
+            hdr_lay.addWidget(to_export_btn)
         lay.addWidget(hdr)
         lay.addWidget(self.embedded_power_plot_tab, 1)
+        return page
+
+    def _goto_export(self):
+        if self.embedded_export_tab is not None:
+            self._update_phase_labels(5)
+            self._overview_btn.setVisible(True)
+            self._stack.setCurrentIndex(self.PAGE_EXPORT)
+            self.embedded_export_tab.refresh()
+
+    def _make_export_page(self) -> QWidget:
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        hdr = QWidget()
+        hdr_lay = QHBoxLayout(hdr)
+        hdr_lay.setContentsMargins(4, 4, 4, 4)
+        hdr_lay.addWidget(QLabel("<b>⑥ Export</b>"))
+        hdr_lay.addStretch()
+        back_btn = QPushButton("◀ Back to Power Plot")
+        back_btn.clicked.connect(self._goto_power_plot)
+        hdr_lay.addWidget(back_btn)
+        lay.addWidget(hdr)
+        lay.addWidget(self.embedded_export_tab, 1)
         return page
 
     # ══ Phase indicator helpers ════════════════════════════════════════════
@@ -3775,6 +4335,7 @@ class PowerPipelineTab(QWidget):
             self._correction_applied or bool(self.get_corrected_fn()),  # ③ Correction
             bool(stitched),                                             # ④ Stitching
             False,                                                      # ⑤ Power Plot
+            False,                                                      # ⑥ Export
         ]
 
     def _update_phase_labels(self, active: int):
@@ -4153,6 +4714,15 @@ class MainWindow(QMainWindow):
             set_save_dir=lambda p: self.calib_tab._set_last_dir("save", p),
         )
 
+        self.pipeline_export_tab = ExportTab(
+            get_pl_files_fn   = lambda: self.calib_tab.checked_pl_files(),
+            get_normalized_fn = lambda: self.pipeline_corrections_tab.normalized,
+            get_corrected_fn  = lambda: self.pipeline_pl_tab.corrected,
+            get_stitched_fn   = _pip_get_stitched_for_plot,
+            get_save_dir      = lambda: self.calib_tab._get_last_dir("save"),
+            set_save_dir      = lambda p: self.calib_tab._set_last_dir("save", p),
+        )
+
         # ── Helper closures for the pipeline ─────────────────────────────────
         def _pipeline_auto_correct_and_apply():
             """User-triggered: uses the standard tab methods (with their UI feedback)."""
@@ -4324,6 +4894,7 @@ class MainWindow(QMainWindow):
             silent_auto_correct_fn         = _pipeline_auto_correct_silent,
             get_replay_dir                 = lambda: self.calib_tab._get_last_dir("replay"),
             set_replay_dir                 = lambda p: self.calib_tab._set_last_dir("replay", p),
+            embedded_export_tab            = self.pipeline_export_tab,
         )
 
         # ── Three top-level tabs ──────────────────────────────────────────────
@@ -4426,17 +4997,34 @@ class MainWindow(QMainWindow):
         self.pipeline_pl_dark_tab.refresh_if_needed()
         self.pipeline_wl_dark_tab.refresh_if_needed()
 
-        # Restore the correction-applied flag so phase ③ shows green immediately.
-        # The actual re-computation is deferred to when the user presses Start Pipeline.
-        if getattr(self.calib_tab, "_restored_pip_correction_applied", False):
+        # ── Pipeline: restore correction + stitch state ───────────────────────
+        # If blend logs exist, run correction eagerly so restore_power_mode has
+        # corrected data to work with.  If only correction was done (no stitch),
+        # the flag is set immediately and correction is deferred to Start Pipeline.
+        restored_pip_psl = getattr(self.calib_tab, "_restored_pip_power_stitch_logs", {})
+        pip_corr_applied  = getattr(self.calib_tab, "_restored_pip_correction_applied", False)
+
+        if restored_pip_psl and self.calib_tab.pl_files:
+            try:
+                _pipeline_auto_correct_silent()
+                if self.pipeline_pl_tab.corrected:
+                    self.pipeline_tab._correction_applied = True
+                    self.pipeline_stitch_tab.restore_power_mode(restored_pip_psl)
+                    # on_correction_applied saves the session (correction flag)
+                    if self.pipeline_tab.on_correction_applied:
+                        self.pipeline_tab.on_correction_applied()
+                    # Refresh phase labels so ①–④ show green on first tab switch
+                    self.pipeline_tab.refresh_status()
+            except Exception:
+                pass
+        elif pip_corr_applied:
+            # Correction was done but no stitching — defer to Start Pipeline.
             self.pipeline_tab._correction_applied = True
 
         # Re-save once so the session file reflects the fully-restored state.
-        # Without this, saves that occurred during _ingest_pl (before done-groups
-        # were set for the PL tabs) leave pl_done_groups as [] in the file.
         self.calib_tab._save_session()
 
-        # Crash recovery: restore standard-mode power stitch blend logs
+        # ── Standard mode: restore stitch blend logs ──────────────────────────
         restored_std_psl = getattr(self.calib_tab, "_restored_std_power_stitch_logs", {})
         if restored_std_psl and self.calib_tab.pl_files:
             try:

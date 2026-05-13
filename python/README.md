@@ -72,11 +72,11 @@ Additional controls on this tab:
 
 ## Tab ② — Power-by-Power Pipeline  *(main recommended workflow)*
 
-This tab provides a fully guided, self-contained analysis pipeline.  All five phases live inside a stacked widget — the user never needs to navigate away.  A persistent header bar shows phase-navigation buttons (① PL Dark → ② White Dark → ③ Correction → ④ Stitching → ⑤ Power Plot) that light up **green** as each phase is completed and remain green after a restart.
+This tab provides a fully guided, self-contained analysis pipeline.  All six phases live inside a stacked widget — the user never needs to navigate away.  A persistent header bar shows phase-navigation buttons (① PL Dark → ② White Dark → ③ Correction → ④ Stitching → ⑤ Power Plot → ⑥ Export) that light up **green** as each phase is completed and remain green after a restart.  Stitched results are also fully restored on restart — all blend windows are replayed silently so the export tab has data immediately.
 
 ### Overview page
 
-Press **▶ Start Pipeline** to begin.  The pipeline automatically skips to the furthest incomplete phase — if correction was already run in a previous session it is re-applied silently and the user lands directly on the Correction tab with results shown.  **Reset All** clears all scaling progress and returns to this overview.  **Load & Replay JSON …** replays a previously exported JSON into the pipeline mode.
+Press **▶ Start Pipeline** to begin.  The pipeline automatically skips to the furthest incomplete phase: if stitching was completed in a previous session it navigates directly to the Stitch tab with results ready; if only correction was done it lands on the Correction tab.  **Reset All** clears all scaling progress and returns to this overview.  **Load & Replay JSON …** replays a previously exported JSON into the pipeline mode.
 
 ---
 
@@ -209,6 +209,36 @@ Controls:
 The legend lists power levels in **descending order** (highest power at the top, lowest at the bottom).
 
 Save as PNG and/or SVG at 300 dpi.
+
+---
+
+### Phase ⑥ — Export
+
+**Goal:** save any combination of processing stages to tab-separated files, with optional Savitzky-Golay smoothing, for further analysis in external tools.
+
+Navigate here via the **"⑥ Export →"** button on the Power Plot page, or directly from the phase navigation bar.
+
+**Left panel controls:**
+
+| Control | Description |
+|---------|-------------|
+| Power levels | Checkable list — select any subset to preview/save; All / None buttons |
+| Data to include | Checkboxes for each format shown in the preview |
+| Smoothing | Savitzky-Golay window (3–101 pts, odd) and polynomial order (1–5) sliders |
+| Axis limits | x min/max and y min/max text fields (leave empty for auto-scaling) |
+| Save scope — Powers | "Selected powers only" or "All powers" |
+| Save scope — Formats | "Shown in preview" or "All available" (ignores preview checkboxes) |
+
+**Preview plot:** updates live whenever any control changes.  One colour per power level; format is indicated by line style:
+- Raw PL data: dotted, thin
+- Dark-subtracted & normalised: dashed, thin
+- Whitelight corrected: dash-dot, thin
+- Stitched data: dashed, medium weight, semi-transparent
+- **Smoothed stitched**: solid, thick, full opacity — visually dominant
+
+**File format:** one `.dat` file per power, named `{sample}_{power:.2f}mW_export_{temp:.1f}K.dat`.  The file has a `#` comment header (sample, temperature, power, smoothing parameters) followed by a tab-separated data table: one `Energy(eV)` column shared across all formats, then one column per included format.  The energy axis is the union of all data points from all selected formats — the **full spectrum** from every spectral window, not just what ended up in the final stitch.
+
+**Smoothing:** uses `scipy.signal.savgol_filter`; falls back to a moving-average if `scipy` is not installed.  Smoothing parameters are always recorded in the file header.
 
 ---
 
