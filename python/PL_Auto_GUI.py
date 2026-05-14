@@ -86,6 +86,25 @@ def _powers_match(p: float, q: float) -> bool:
     return abs(p - q) <= _POWER_REL_TOL * max(p, q)
 
 
+# ── Bias-dependent mode ──────────────────────────────────────────────────────
+# When True, bias (V) from the filename replaces excitation power (mW) as the
+# primary grouping variable.  _BIAS_MODE is a module-level flag so all classes
+# can read it without threading callbacks everywhere.
+_BIAS_MODE: bool = False
+
+
+def _group_unit() -> str:
+    """Return the unit string for the current grouping variable."""
+    return "V" if _BIAS_MODE else "mW"
+
+
+def _group_val(metadata: dict) -> Optional[float]:
+    """Return the grouping value (Exc_P or Bias_V) for a PL file's metadata."""
+    if _BIAS_MODE:
+        return metadata.get("Bias_V")
+    return metadata.get("Exc_P")
+
+
 def _lookup_dark_scale(dark_scale_dict: dict, filename: str) -> float:
     """Return the dark scale for a specific file, or 1.0 if not set."""
     return float(dark_scale_dict.get(filename, 1.0)) if dark_scale_dict else 1.0
@@ -143,12 +162,19 @@ class PL_file:
         else:
             exc_p_raw = None
         
+        # Parse bias voltage from filename: pattern _(-?\d+\.?\d*)V_ avoids
+        # matching energy strings like _0.96eV_ (which have 'e' before 'V').
+        _fname = Path(self.file_path).name
+        _m_bias = re.search(r'_(-?\d+\.?\d*)V[_.]', _fname)
+        bias_raw = float(_m_bias.group(1)) if _m_bias else None
+
         self.metadata: dict = {
             "Temp":          _rx_float(r"(\d+\.?\d*)\s*K",             str(h.iloc[1, 1])),
             "int_time":      _rx_float(r"(\d+\.?\d*)\s*s",             str(h.iloc[2, 1])),
             "Center_lambda": _rx_float(r"(\d+\.?\d*)\s*nm",            str(h.iloc[4, 1])),
             "Center_E":      _rx_float(r"nm\s*/\s*(\d+\.\d{3})\s*eV", str(h.iloc[4, 1])),
             "Exc_P":         exc_p_raw,
+            "Bias_V":        bias_raw,
             "filename":      Path(self.file_path).name,
         }
     # Multiplicative scale applied to this file's counts before dark subtraction.
@@ -547,9 +573,12 @@ class CalibrationTab(QWidget):
         self._dark_row_map:  list = []   # [(ce, it), …] parallel to dark_table rows
         self._white_row_map: list = []   # [(ce, it), …] parallel to white_table rows
         # Set by MainWindow after downstream tabs are created:
-        self.on_pl_files_changed = None   # callable() → refresh PLAnalysisTab table
+        self.on_pl_files_changed    = None   # callable() → refresh PLAnalysisTab table
+        self.on_bias_mode_changed   = None   # callable() → refresh static labels in other tabs
         # Remembered last-used directories — persisted in session JSON.
         self._last_dirs: dict = {"load": "", "save": "", "replay": ""}
+        # Bias-dependent mode: bias (V) from filename replaces power as grouping key.
+        self._bias_mode: bool = False
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -570,6 +599,13 @@ class CalibrationTab(QWidget):
         session_row.addWidget(self.new_session_btn)
         session_row.addWidget(self.replay_btn)
         session_row.addStretch()
+        self.bias_mode_chk = QCheckBox("Bias-dependent mode")
+        self.bias_mode_chk.setToolTip(
+            "Enable when measurements are taken at different bias voltages instead of\n"
+            "different excitation powers.  The bias is parsed from the filename\n"
+            "pattern  …_(-?\\d+.\\d*)V_…  and replaces power as the grouping key."
+        )
+        session_row.addWidget(self.bias_mode_chk)
         layout.addLayout(session_row)
 
         # ── 1. Halogen ──────────────────────────────────────────────────────
@@ -646,6 +682,7 @@ class CalibrationTab(QWidget):
         # Wire up
         self.new_session_btn.clicked.connect(self._new_session)
         self.replay_btn.clicked.connect(self._request_replay)
+        self.bias_mode_chk.toggled.connect(self._set_bias_mode)
         self.halo_load_btn.clicked.connect(self._load_halogen)
         self.dark_load_btn.clicked.connect(self._load_dark_files)
         self.dark_folder_btn.clicked.connect(self._load_dark_folder)
@@ -691,6 +728,28 @@ class CalibrationTab(QWidget):
         if new_dir and self._last_dirs.get(category) != new_dir:
             self._last_dirs[category] = new_dir
             self._save_session()
+
+    # ── Bias mode ────────────────────────────────────────────────────────────
+    def _set_bias_mode(self, enabled: bool):
+        """Toggle bias-dependent mode: Bias_V from filename replaces Exc_P."""
+        global _BIAS_MODE
+        self._bias_mode = enabled
+        _BIAS_MODE = enabled
+        # Re-apply (or remove) the Exc_P override on all loaded PL files.
+        for pf in self.pl_files:
+            if enabled:
+                if pf.metadata.get("Bias_V") is not None:
+                    pf.metadata["Exc_P"] = pf.metadata["Bias_V"]
+            else:
+                if pf.metadata.get("_orig_exc_p", "UNSET") != "UNSET":
+                    pf.metadata["Exc_P"] = pf.metadata["_orig_exc_p"]
+        # Refresh the PL table so column header and values update.
+        self.refresh_pl_table()
+        self._save_session()
+        if self.on_pl_files_changed:
+            self.on_pl_files_changed()
+        if self.on_bias_mode_changed:
+            self.on_bias_mode_changed()
 
     # ── Session control ──────────────────────────────────────────────────────
     def _new_session(self):
@@ -758,6 +817,7 @@ class CalibrationTab(QWidget):
             self._session_path().write_text(json.dumps({
                 "halogen_path": self._halogen_path,
                 "last_dirs":    self._last_dirs,
+                "bias_mode":    self._bias_mode,
                 "dark_paths":   dark_paths,
                 "white_paths":  white_paths,
                 "pl_paths":     pl_paths,
@@ -843,6 +903,13 @@ class CalibrationTab(QWidget):
             d = saved_dirs.get(key, "")
             if d and Path(d).is_dir():
                 self._last_dirs[key] = d
+
+        # Bias mode — must be set before _ingest_pl applies the Exc_P override
+        global _BIAS_MODE
+        self._bias_mode = bool(data.get("bias_mode", False))
+        _BIAS_MODE = self._bias_mode
+        # Defer UI sync to after __init__ so the checkbox exists
+        self._restored_bias_mode = self._bias_mode
 
         # PL files — deferred until MainWindow calls _ingest_pl
         self._restored_pl_paths = [fp for fp in data.get("pl_paths", []) if Path(fp).exists()]
@@ -1030,7 +1097,12 @@ class CalibrationTab(QWidget):
         errors = []
         for fp in paths:
             try:
-                self.pl_files.append(PL_file(str(fp)))
+                pf = PL_file(str(fp))
+                # Always preserve the original Exc_P so mode switches are reversible.
+                pf.metadata["_orig_exc_p"] = pf.metadata["Exc_P"]
+                if self._bias_mode and pf.metadata.get("Bias_V") is not None:
+                    pf.metadata["Exc_P"] = pf.metadata["Bias_V"]
+                self.pl_files.append(pf)
             except Exception as exc:
                 errors.append(f"{Path(fp).name}: {exc}")
         self.refresh_pl_table()
@@ -1072,18 +1144,25 @@ class CalibrationTab(QWidget):
         return "✘"
 
     def refresh_pl_table(self):
-        """Refresh the PL file table."""
+        """Refresh the PL file table, adapting the group-key column for bias mode."""
+        # Update column header to reflect current mode
+        group_col_header = "Bias (V)" if self._bias_mode else "Power (mW)"
+        hdr = self.pl_table.horizontalHeaderItem(5)  # col 5 = Power/Bias (after Plot=0)
+        if hdr:
+            hdr.setText(group_col_header)
+
         rows = []
         for pf in self.pl_files:
             m  = pf.metadata
             ce = m["Center_E"]
             it = m["int_time"]
+            gval = m.get("Exc_P")   # already overridden to Bias_V in bias mode
             rows.append([
                 m["filename"],
                 f"{ce:.3f}" if ce is not None else "—",
                 f"{it:.3f}" if it is not None else "—",
                 f"{m['Temp']:.1f}" if m["Temp"] is not None else "—",
-                f"{m['Exc_P']:.2f}" if m["Exc_P"] is not None else "—",
+                f"{gval:.3f}" if gval is not None else "—",
                 self._dark_match_symbol(ce, it),
             ])
         self.pl_table.populate(rows, keep_checks=True)
@@ -1223,7 +1302,7 @@ class CorrectionsTab(QWidget):
             if fname in self.normalized:
                 df  = self.normalized[fname]
                 p   = pf.metadata.get("Exc_P")
-                lbl = f"{p:.2f} mW" if p is not None else fname
+                lbl = f"{p:.2f} {_group_unit()}" if p is not None else fname
                 series.append((df["Energy"].to_numpy(), df["Counts"].to_numpy(), lbl))
         if series:
             self.sub_plot.plot_series(
@@ -1345,6 +1424,15 @@ class PLAnalysisTab(QWidget):
         self.chk_all.clicked.connect(lambda: self.pl_table.check_all(True))
         self.unchk_all.clicked.connect(lambda: self.pl_table.check_all(False))
 
+    def refresh_group_labels(self):
+        """Update static labels that reference 'power' to adapt to bias mode."""
+        grp = 'Bias' if _BIAS_MODE else 'Power'
+        self.stitch_power_btn.setText(f"Stitch {grp} by {grp} →")
+        self.stitch_power_btn.setToolTip(
+            f"Stitch each {'bias' if _BIAS_MODE else 'power'} level separately "
+            "with its own blend windows.\nResults accumulate — save collectively at the end."
+        )
+
     # ── Table management ─────────────────────────────────────────────────────
     def refresh_table(self):
         """Repopulate the table from get_pl_files().  Preserves check states."""
@@ -1418,7 +1506,7 @@ class PLAnalysisTab(QWidget):
     @staticmethod
     def _power_label(pf) -> str:
         p = pf.metadata.get("Exc_P")
-        return f"{p:.2f} mW" if p is not None else pf.metadata["filename"]
+        return f"{p:.2f} {_group_unit()}" if p is not None else pf.metadata["filename"]
 
     def _plot_raw(self):
         normalized = self.get_normalized()
@@ -1562,10 +1650,12 @@ class StitchTab(QWidget):
 
         layout = QVBoxLayout(self)
 
+        _grp = 'bias' if _BIAS_MODE else 'power'
         ctrl_box = QGroupBox(
-            "7.  Stitch  &  Export  "
-            "(groups checked files by power — same blend window applied to all groups)"
+            f"7.  Stitch  &  Export  "
+            f"(groups checked files by {_grp} — same blend window applied to all groups)"
         )
+        self._stitch_ctrl_box = ctrl_box
         cg = QVBoxLayout(ctrl_box)
 
         # ── Button row ────────────────────────────────────────────────────
@@ -1585,11 +1675,14 @@ class StitchTab(QWidget):
 
         # ── Power-by-power navigation row (hidden in normal mode) ─────────
         power_nav_row = QHBoxLayout()
-        power_nav_row.addWidget(QLabel("Powers:"))
+        self._groups_nav_label = QLabel("Powers:")
+        power_nav_row.addWidget(self._groups_nav_label)
         self._prev_power_btn = QPushButton("◀ Prev")
         self._next_power_btn = QPushButton("Next ▶")
-        self._redo_power_btn = QPushButton("↺ Redo This Power")
-        self._redo_power_btn.setToolTip("Reset and redo stitching for the current power level.")
+        self._redo_power_btn = QPushButton(f"↺ Redo This {'Bias' if _BIAS_MODE else 'Power'}")
+        self._redo_power_btn.setToolTip(
+            f"Reset and redo stitching for the current {'bias' if _BIAS_MODE else 'power'} level."
+        )
         self._prev_power_btn.clicked.connect(self._prev_power)
         self._next_power_btn.clicked.connect(self._next_power)
         self._redo_power_btn.clicked.connect(self._redo_current_power)
@@ -1652,6 +1745,30 @@ class StitchTab(QWidget):
 
         self.status = QLabel("Apply correction in the PL Analysis tab first.")
         cg.addWidget(self.status)
+
+        # ── y-axis limits ─────────────────────────────────────────────────
+        ylim_row = QHBoxLayout()
+        ylim_row.addWidget(QLabel("y limits (log):"))
+        self._ylim_min_edit = QLineEdit()
+        self._ylim_min_edit.setPlaceholderText("min (auto)")
+        self._ylim_min_edit.setMaximumWidth(90)
+        self._ylim_max_edit = QLineEdit()
+        self._ylim_max_edit.setPlaceholderText("max (auto)")
+        self._ylim_max_edit.setMaximumWidth(90)
+        ylim_row.addWidget(self._ylim_min_edit)
+        ylim_row.addWidget(QLabel("–"))
+        ylim_row.addWidget(self._ylim_max_edit)
+        apply_ylim_btn = QPushButton("Apply")
+        apply_ylim_btn.setMaximumWidth(55)
+        apply_ylim_btn.clicked.connect(self._apply_ylim)
+        ylim_row.addWidget(apply_ylim_btn)
+        reset_ylim_btn = QPushButton("Reset")
+        reset_ylim_btn.setMaximumWidth(55)
+        reset_ylim_btn.clicked.connect(self._reset_ylim)
+        ylim_row.addWidget(reset_ylim_btn)
+        ylim_row.addStretch()
+        cg.addLayout(ylim_row)
+
         layout.addWidget(ctrl_box)
 
         self.plot = PlotWidget(min_h=500, log_y=True)
@@ -1660,6 +1777,46 @@ class StitchTab(QWidget):
         self.do_btn.clicked.connect(self._do_stitch)
         self.restart_btn.clicked.connect(self._restart)
         self.save_btn.clicked.connect(self._save)
+
+    # ── y-axis limit helpers ──────────────────────────────────────────────
+    def _parse_ylim(self) -> tuple:
+        def _f(edit):
+            try: return float(edit.text().strip()) if edit.text().strip() else None
+            except ValueError: return None
+        return _f(self._ylim_min_edit), _f(self._ylim_max_edit)
+
+    def _apply_stored_ylim(self):
+        """Re-apply stored ylim after any plot update."""
+        ymin, ymax = self._parse_ylim()
+        if ymin is not None or ymax is not None:
+            cur = self.plot.ax.get_ylim()
+            self.plot.ax.set_ylim(
+                ymin if ymin is not None else cur[0],
+                ymax if ymax is not None else cur[1],
+            )
+            self.plot.canvas.draw_idle()
+
+    def _apply_ylim(self):
+        self._apply_stored_ylim()
+
+    def _reset_ylim(self):
+        self._ylim_min_edit.clear()
+        self._ylim_max_edit.clear()
+        self.plot.ax.autoscale(axis="y")
+        self.plot.canvas.draw_idle()
+
+    def refresh_group_labels(self):
+        """Update static labels that say 'Power/Powers' to 'Bias/Biases' in bias mode."""
+        grp  = 'Bias'   if _BIAS_MODE else 'Power'
+        grps = 'Biases' if _BIAS_MODE else 'Powers'
+        _g   = 'bias'   if _BIAS_MODE else 'power'
+        self._groups_nav_label.setText(f"{grps}:")
+        self._redo_power_btn.setText(f"↺ Redo This {grp}")
+        self._redo_power_btn.setToolTip(f"Reset and redo stitching for the current {_g} level.")
+        self._stitch_ctrl_box.setTitle(
+            f"7.  Stitch  &  Export  "
+            f"(groups checked files by {_g} — same blend window applied to all groups)"
+        )
 
     # ── Pipeline checklist ────────────────────────────────────────────────
     def refresh_checklist(self):
@@ -1726,7 +1883,7 @@ class StitchTab(QWidget):
         name = m.group(1) if m else Path(pf.file_path).stem
         temp     = pf.metadata.get("Temp")
         temp_str = f"{temp:.1f}" if temp is not None else "None"
-        return f"{name}_{power:.2f}mW_stitched_{temp_str}K"
+        return f"{name}_{power:.2f}{_group_unit()}_stitched_{temp_str}K"
 
     # ── Reset ─────────────────────────────────────────────────────────────
     def reset(self):
@@ -1786,7 +1943,7 @@ class StitchTab(QWidget):
             self.restart_btn.setEnabled(False)
             n_g = len(self._single_window_groups)
             self.status.setText(
-                f"{n_g} power group(s) — single spectral window each, no stitching needed.  "
+                f"{n_g} group(s) — single spectral window each, no stitching needed.  "
                 "Press 'Save All' to export."
             )
             if self.on_stitching_done:
@@ -1796,7 +1953,7 @@ class StitchTab(QWidget):
         sizes = {p: len(pfs) for p, pfs in groups_ok.items()}
         if len(set(sizes.values())) > 1:
             msg = "\n".join(
-                f"  {p:.2f} mW → {n} window(s)"
+                f"  {p:.2f} {_group_unit()} → {n} window(s)"
                 for p, n in sorted(sizes.items())
             )
             QMessageBox.warning(self, "Window count mismatch",
@@ -1816,7 +1973,7 @@ class StitchTab(QWidget):
         extra = (f"  ({len(self._single_window_groups)} single-window power(s) auto-completed.)"
                  if self._single_window_groups else "")
         self.status.setText(
-            f"{n_g} power group(s) ready.{extra}  "
+            f"{n_g} group(s) ready.{extra}  "
             "Click and drag to select blend window, then press 'Do Stitch'."
         )
 
@@ -1851,8 +2008,8 @@ class StitchTab(QWidget):
             ovl_mins.append(float(max(xl.min(), xr.min())))
             ovl_maxs.append(float(min(xl.max(), xr.max())))
 
-            series.append((xl, left["Counts"].to_numpy(),     f"{power:.2f} mW  left"))
-            series.append((xr, right_df["Counts"].to_numpy(), f"{power:.2f} mW  right"))
+            series.append((xl, left["Counts"].to_numpy(),     f"{power:.2f} {_group_unit()}  left"))
+            series.append((xr, right_df["Counts"].to_numpy(), f"{power:.2f} {_group_unit()}  right"))
 
         x_ovl_min = max(ovl_mins)
         x_ovl_max = min(ovl_maxs)
@@ -1865,6 +2022,7 @@ class StitchTab(QWidget):
             f"({n_g} group(s) — select blend window, then press 'Do Stitch')",
             log_y=True,
         )
+        self._apply_stored_ylim()
         self._install_span()
 
         self.step_label.setText(
@@ -1893,7 +2051,7 @@ class StitchTab(QWidget):
                 self.stitched_results[power] = stitched
                 ratios[power] = ratio
             except Exception as exc:
-                errors.append(f"{power:.2f} mW: {exc}")
+                errors.append(f"{power:.2f} {_group_unit()}: {exc}")
 
         # Log this stitch step for metadata export
         if self.power_groups:
@@ -1917,10 +2075,11 @@ class StitchTab(QWidget):
             # All steps done for this power/group — show final stitched result
             self.do_btn.setEnabled(False)
             series = [
-                (r["Energy"].to_numpy(), r["Counts"].to_numpy(), f"{p:.2f} mW")
+                (r["Energy"].to_numpy(), r["Counts"].to_numpy(), f"{p:.2f} {_group_unit()}")
                 for p, r in sorted(self.stitched_results.items())
             ]
             self.plot.plot_series(series, "Final stitched result", log_y=True)
+            self._apply_stored_ylim()
             self.step_label.setText(f"Step {self.current_step + 1}/{self.n_steps}  ✓  —  Done")
 
             if self._power_mode:
@@ -1938,15 +2097,15 @@ class StitchTab(QWidget):
                 if n_done == n_total:
                     self.save_btn.setEnabled(True)
                     self.status.setText(
-                        f"All {n_total} power(s) stitched!  Press 'Save All' to export."
+                        f"All {n_total} {'bias(es)' if _BIAS_MODE else 'power(s)'} stitched!  Press 'Save All' to export."
                     )
                     if self.on_stitching_done:
                         self.on_stitching_done()
                 else:
                     remaining = [p for p in self._power_order if not self._power_done.get(p)]
                     self.status.setText(
-                        f"{power:.2f} mW done  ({n_done}/{n_total})  —  "
-                        f"{len(remaining)} power(s) remaining.  "
+                        f"{power:.2f} {_group_unit()} done  ({n_done}/{n_total})  —  "
+                        f"{len(remaining)} {'bias(es)' if _BIAS_MODE else 'power(s)'} remaining.  "
                         "Use pills or ▶ to navigate."
                     )
                     # Auto-advance to next undone power after a short delay
@@ -2060,7 +2219,7 @@ class StitchTab(QWidget):
                 item.widget().deleteLater()
         self._power_pills = {}
         for p in self._power_order:
-            btn = QPushButton(f"{p:.2f} mW")
+            btn = QPushButton(f"{p:.2f} {_group_unit()}")
             btn.setFlat(True)
             btn.clicked.connect(lambda _checked=False, pw=p: self._goto_power(pw))
             self._power_pills[p] = btn
@@ -2099,14 +2258,14 @@ class StitchTab(QWidget):
             if n_done == n_total:
                 self.save_btn.setEnabled(True)
                 self.status.setText(
-                    f"All {n_total} power(s) complete!  Press 'Save All' to export."
+                    f"All {n_total} {'bias(es)' if _BIAS_MODE else 'power(s)'} complete!  Press 'Save All' to export."
                 )
                 if self.on_stitching_done:
                     self.on_stitching_done()
             else:
                 next_undone = next((p for p in self._power_order if not self._power_done.get(p)), None)
                 self.status.setText(
-                    f"{power:.2f} mW: single window, auto-completed  "
+                    f"{power:.2f} {_group_unit()}: single window, auto-completed  "
                     f"({n_done}/{n_total})."
                 )
                 if next_undone is not None:
@@ -2129,21 +2288,22 @@ class StitchTab(QWidget):
             stitched_df = self._power_stitched[power]
             self.plot.plot_series(
                 [(stitched_df["Energy"].to_numpy(), stitched_df["Counts"].to_numpy(),
-                  f"{power:.2f} mW  stitched")],
-                f"✓ {power:.2f} mW — already stitched  "
-                f"({n_done}/{len(self._power_order)} powers done)  "
-                "— press '↺ Redo This Power' to redo",
+                  f"{power:.2f} {_group_unit()}  stitched")],
+                f"✓ {power:.2f} {_group_unit()} — already stitched  "
+                f"({n_done}/{len(self._power_order)} {'biases' if _BIAS_MODE else 'powers'} done)  "
+                f"— press '↺ Redo This {'Bias' if _BIAS_MODE else 'Power'}' to redo",
                 log_y=True,
             )
+            self._apply_stored_ylim()
             self.step_label.setText(
                 f"Step {self.n_steps}/{self.n_steps}  ✓  —  Done"
             )
             self.do_btn.setEnabled(False)
             self.save_btn.setEnabled(n_done == len(self._power_order))
             self.status.setText(
-                f"✓ {power:.2f} mW already stitched  "
-                f"({n_done}/{len(self._power_order)} powers done).  "
-                "Use pills or ▶ to navigate, or '↺ Redo This Power' to redo."
+                f"✓ {power:.2f} {_group_unit()} already stitched  "
+                f"({n_done}/{len(self._power_order)} {'biases' if _BIAS_MODE else 'powers'} done).  "
+                f"Use pills or ▶ to navigate, or '↺ Redo This {'Bias' if _BIAS_MODE else 'Power'}' to redo."
             )
         else:
             self.current_step = 0
@@ -2151,8 +2311,8 @@ class StitchTab(QWidget):
             self.stitched_results = {power: pfs[0][0].copy()}
             self._show_step()
             self.status.setText(
-                f"Power {self._power_idx + 1}/{len(self._power_order)}: {power:.2f} mW  "
-                f"|  {n_done}/{len(self._power_order)} powers complete."
+                f"{'Bias' if _BIAS_MODE else 'Power'} {self._power_idx + 1}/{len(self._power_order)}: {power:.2f} {_group_unit()}  "
+                f"|  {n_done}/{len(self._power_order)} {'biases' if _BIAS_MODE else 'powers'} complete."
             )
 
     def _goto_power(self, power: float):
@@ -2221,7 +2381,7 @@ class StitchTab(QWidget):
                 center_Es = [round(pf.metadata["Center_E"], 4) for _, pf in pfs
                              if pf.metadata.get("Center_E") is not None]
                 stitch_info[f"{power:.4f}"] = {
-                    "power_mW": round(power, 4),
+                    ("bias_V" if _BIAS_MODE else "power_mW"): round(power, 4),
                     "center_energies_eV": center_Es,
                     "blend_windows": self._power_blend_logs.get(power, []),
                 }
@@ -2593,7 +2753,7 @@ class DarkScalingTab(QWidget):
                 yp  = pf.df["Counts"].to_numpy(float)
                 p   = pf.metadata.get("Exc_P")
                 it  = pf.metadata.get("int_time")
-                lbl = (f"{p:.2f} mW" if p is not None
+                lbl = (f"{p:.2f} {_group_unit()}" if p is not None
                        else f"{self.file_label}  {it:.3g} s" if it is not None
                        else pf.metadata["filename"])
                 ax.semilogy(xp, np.where(yp > 0, yp, np.nan), lw=1, label=lbl)
@@ -2647,14 +2807,14 @@ class DarkScalingTab(QWidget):
         if not groups:
             if power is not None:
                 self.status.setText(
-                    f"No groups match power ≈ {power:.2f} mW — "
+                    f"No groups match {'bias' if _BIAS_MODE else 'power'} ≈ {power:.2f} {_group_unit()} — "
                     "load files or check dark matching."
                 )
             return
         self._apply_groups(groups)
         self._draw_group()
         n = sum(len(lst) for _, lst in self._groups)
-        suffix = f"  (filtered to ≈ {power:.2f} mW)" if power is not None else ""
+        suffix = f"  (filtered to ≈ {power:.2f} {_group_unit()})" if power is not None else ""
         self.status.setText(
             f"{len(self._groups)} group(s) ready  ({n} {self.file_label} file(s)){suffix}."
         )
@@ -3013,8 +3173,9 @@ class ExportTab(QWidget):
         lv.setContentsMargins(0, 0, 0, 0)
         lv.setSpacing(6)
 
-        # Power selector (multi-select)
-        pw_box = QGroupBox("Power levels")
+        # Group selector (multi-select)
+        pw_box = QGroupBox(f"{'Bias' if _BIAS_MODE else 'Power'} levels")
+        self._pw_groupbox = pw_box
         pb = QVBoxLayout(pw_box)
         pw_btns = QHBoxLayout()
         sel_all_btn = QPushButton("All")
@@ -3086,9 +3247,11 @@ class ExportTab(QWidget):
         scope_box = QGroupBox("Save scope")
         scb = QVBoxLayout(scope_box)
 
-        scb.addWidget(QLabel("Powers:"))
-        self._save_selected_rb = QCheckBox("Selected powers only")
-        self._save_all_rb      = QCheckBox("All powers")
+        _grps = 'Biases' if _BIAS_MODE else 'Powers'
+        self._scope_powers_label = QLabel(f"{_grps}:")
+        scb.addWidget(self._scope_powers_label)
+        self._save_selected_rb = QCheckBox(f"Selected {_grps.lower()} only")
+        self._save_all_rb      = QCheckBox(f"All {_grps.lower()}")
         self._save_all_rb.setChecked(True)
         scb.addWidget(self._save_selected_rb)
         scb.addWidget(self._save_all_rb)
@@ -3302,6 +3465,15 @@ class ExportTab(QWidget):
 
     # ── UI updates ────────────────────────────────────────────────────
 
+    def refresh_group_labels(self):
+        """Update static labels that say 'Power/Powers' to 'Bias/Biases' in bias mode."""
+        grp = 'Bias' if _BIAS_MODE else 'Power'
+        grps = 'Biases' if _BIAS_MODE else 'Powers'
+        self._pw_groupbox.setTitle(f"{grp} levels")
+        self._scope_powers_label.setText(f"{grps}:")
+        self._save_selected_rb.setText(f"Selected {grps.lower()} only")
+        self._save_all_rb.setText(f"All {grps.lower()}")
+
     def refresh(self):
         """Rebuild the power list (preserve checked state) and refresh preview."""
         powers = self._available_powers()
@@ -3315,7 +3487,7 @@ class ExportTab(QWidget):
         self._power_list.blockSignals(True)
         self._power_list.clear()
         for p in powers:
-            item = QListWidgetItem(f"{p:.2f} mW")
+            item = QListWidgetItem(f"{p:.2f} {_group_unit()}")
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
             # Default: check all; restore previous state if available
             was_checked = not prev_checked or any(_powers_match(p, q) for q in prev_checked)
@@ -3329,7 +3501,7 @@ class ExportTab(QWidget):
         sel = self._selected_powers()
         if not sel:
             self._plot.clear()
-            self._status.setText("No powers selected.")
+            self._status.setText(f"No {'biases' if _BIAS_MODE else 'powers'} selected.")
             return
 
         ax = self._plot.ax
@@ -3348,12 +3520,12 @@ class ExportTab(QWidget):
                 )
                 y_plot = np.where(y > 0, y, np.nan)
                 ax.semilogy(x_ref, y_plot, color=colour, ls=ls, lw=lw, alpha=alpha,
-                            label=f"{power:.2f} mW — {col_name}")
+                            label=f"{power:.2f} {_group_unit()} — {col_name}")
         ax.set_xlabel("Energy (eV)")
         ax.set_ylabel("Intensity")
         title = "Export preview"
         if len(sel) == 1:
-            title += f" — {sel[0]:.2f} mW"
+            title += f" — {sel[0]:.2f} {_group_unit()}"
         ax.set_title(title)
         if any_data:
             ax.legend(fontsize=7)
@@ -3382,9 +3554,9 @@ class ExportTab(QWidget):
         self._plot._safe_draw()
 
         if not any_data:
-            self._status.setText("No data for selected powers — run correction/stitching first.")
+            self._status.setText(f"No data for selected {'biases' if _BIAS_MODE else 'powers'} — run correction/stitching first.")
         else:
-            self._status.setText(f"{len(sel)} power(s) selected")
+            self._status.setText(f"{len(sel)} {'bias(es)' if _BIAS_MODE else 'power(s)'} selected")
 
     # ── Save ──────────────────────────────────────────────────────────
 
@@ -3432,7 +3604,7 @@ class ExportTab(QWidget):
             else:
                 sample, temp_s = "sample", "?"
 
-            fname = f"{sample}_{power:.2f}mW_export_{temp_s}K.dat"
+            fname = f"{sample}_{power:.2f}{_group_unit()}_export_{temp_s}K.dat"
             fpath = out / fname
 
             col_names = ["Energy(eV)"] + list(cols.keys())
@@ -3440,7 +3612,7 @@ class ExportTab(QWidget):
                 with open(fpath, "w", encoding="utf-8") as fh:
                     fh.write(f"# Sample: {sample}\n")
                     fh.write(f"# Temperature: {temp_s} K\n")
-                    fh.write(f"# Power: {power:.4f} mW\n")
+                    fh.write(f"# {'Bias' if _BIAS_MODE else 'Power'}: {power:.4f} {_group_unit()}\n")
                     if "Stitched_smooth" in cols:
                         method = "Savitzky-Golay" if _SCIPY_AVAILABLE else "moving-average"
                         fh.write(
@@ -3548,9 +3720,10 @@ class PowerPipelineTab(QWidget):
         root.setSpacing(4)
 
         # ── Persistent header bar (always visible) ────────────────────────
-        hdr_box = QGroupBox("⑧  Power-by-Power Pipeline")
+        hdr_box = QWidget()
         hdr_lay = QVBoxLayout(hdr_box)
         hdr_lay.setSpacing(4)
+        hdr_lay.setContentsMargins(0, 0, 0, 0)
 
         phase_row = QHBoxLayout()
         phase_row.addWidget(QLabel("Phase:"))
@@ -3560,7 +3733,7 @@ class PowerPipelineTab(QWidget):
             ("② White Dark", lambda: self._goto_wl_dark()),
             ("③ Correction", lambda: self._goto_correction()),
             ("④ Stitching",  lambda: self._goto_stitch()),
-            ("⑤ Power Plot", lambda: self._goto_power_plot()),
+            (f"⑤ {'Bias' if _BIAS_MODE else 'Power'} Plot", lambda: self._goto_power_plot()),
             ("⑥ Export",     lambda: self._goto_export()),
         ]
         for txt, nav_fn in _phase_nav:
@@ -3665,19 +3838,24 @@ class PowerPipelineTab(QWidget):
         lay  = QVBoxLayout(page)
         lay.setAlignment(Qt.AlignTop)
 
-        title = QLabel("<b>Power-by-Power Pipeline</b>")
-        title.setStyleSheet("font-size: 14px; padding: 8px 0;")
-        lay.addWidget(title)
-
-        desc = QLabel(
-            "Guided analysis — all steps happen here, nothing to navigate away:\n"
-            "  ①  Scale PL dark spectra for each excitation power independently\n"
-            "  ②  Scale white dark spectra (once, for all spectral windows)\n"
-            "  ③  Auto-compute and apply whitelight correction\n"
-            "  ④  Stitch spectra power by power\n"
-            "  ⑤  Plot and export the power series\n\n"
-            "Load PL, dark, white, and halogen files in Tab ① before starting."
+        self._overview_title_lbl = QLabel(
+            f"<b>{'Bias-by-Bias' if _BIAS_MODE else 'Power-by-Power'} Pipeline</b>"
         )
+        self._overview_title_lbl.setStyleSheet("font-size: 14px; padding: 8px 0;")
+        lay.addWidget(self._overview_title_lbl)
+
+        _g = 'bias' if _BIAS_MODE else 'power'
+        _G = 'Bias'  if _BIAS_MODE else 'Power'
+        desc = QLabel(
+            f"Guided analysis — all steps happen here, nothing to navigate away:\n"
+            f"  ①  Scale PL dark spectra for each {_g} independently\n"
+            f"  ②  Scale white dark spectra (once, for all spectral windows)\n"
+            f"  ③  Auto-compute and apply whitelight correction\n"
+            f"  ④  Stitch spectra {_g} by {_g}\n"
+            f"  ⑤  Plot and export the {_g} series\n\n"
+            f"Load PL, dark, white, and halogen files in Tab ① before starting."
+        )
+        self._overview_desc_lbl = desc
         desc.setWordWrap(True)
         desc.setStyleSheet("padding: 4px 0 12px 0;")
         lay.addWidget(desc)
@@ -3719,17 +3897,20 @@ class PowerPipelineTab(QWidget):
         hdr_lay.setSpacing(3)
 
         pills_row = QHBoxLayout()
-        pills_row.addWidget(QLabel("<b>① PL Dark — Power:</b>"))
+        self._pl_dark_header_lbl = QLabel(f"<b>① PL Dark — {'Bias' if _BIAS_MODE else 'Power'}:</b>")
+        pills_row.addWidget(self._pl_dark_header_lbl)
         self._pl_pills_container = QWidget()
         self._pl_pills_layout    = QHBoxLayout(self._pl_pills_container)
         self._pl_pills_layout.setContentsMargins(0, 0, 0, 0)
         self._pl_pills_layout.setSpacing(4)
         pills_row.addWidget(self._pl_pills_container, 1)
-        self._pl_next_btn = QPushButton("Next Power ▶")
+        self._pl_next_btn = QPushButton(f"Next {'Bias' if _BIAS_MODE else 'Power'} ▶")
         self._pl_next_btn.setVisible(False)
         self._pl_next_btn.clicked.connect(lambda: self._advance_pl_power())
         pills_row.addWidget(self._pl_next_btn)
-        self._pl_to_wl_btn = QPushButton("All Powers Done — ② White Dark ▶")
+        self._pl_to_wl_btn = QPushButton(
+            f"All {'Biases' if _BIAS_MODE else 'Powers'} Done — ② White Dark ▶"
+        )
         self._pl_to_wl_btn.setVisible(False)
         self._pl_to_wl_btn.setStyleSheet(
             "QPushButton { font-weight: bold; color: white; "
@@ -3839,10 +4020,14 @@ class PowerPipelineTab(QWidget):
         hdr = QWidget()
         hdr_lay = QHBoxLayout(hdr)
         hdr_lay.setContentsMargins(4, 4, 4, 4)
-        hdr_lay.addWidget(QLabel("<b>④ Stitch — Power by Power</b>"))
+        self._stitch_hdr_lbl = QLabel(
+            f"<b>④ Stitch — {'Bias' if _BIAS_MODE else 'Power'} by {'Bias' if _BIAS_MODE else 'Power'}</b>"
+        )
+        hdr_lay.addWidget(self._stitch_hdr_lbl)
         hdr_lay.addStretch()
         if self.embedded_power_plot_tab is not None:
-            self._stitch_to_plot_btn = QPushButton("⑤ Power Series Plot →")
+            _ps = f"{'Bias' if _BIAS_MODE else 'Power'} Series Plot"
+            self._stitch_to_plot_btn = QPushButton(f"⑤ {_ps} →")
             self._stitch_to_plot_btn.setStyleSheet(
                 "QPushButton { font-weight: bold; color: white; "
                 "background-color: #6a1b9a; border-radius: 4px; padding: 3px 10px; }"
@@ -3917,7 +4102,7 @@ class PowerPipelineTab(QWidget):
                 item.widget().deleteLater()
         self._pl_dark_pills = {}
         for p in self._pl_dark_powers:
-            btn = QPushButton(f"{p:.2f} mW")
+            btn = QPushButton(f"{p:.2f} {_group_unit()}")
             btn.setFlat(True)
             btn.setCheckable(True)
             btn.clicked.connect(lambda _c=False, pw=p: self._select_pl_power(pw))
@@ -3980,8 +4165,8 @@ class PowerPipelineTab(QWidget):
         n_done  = sum(1 for v in self._pl_done.values() if v)
         n_total = len(self._pl_dark_powers)
         self._pl_dark_status.setText(
-            f"Power {power:.2f} mW  ({n_done}/{n_total} powers done)  "
-            "— Scale all CE groups for this power, then advance."
+            f"{'Bias' if _BIAS_MODE else 'Power'} {power:.2f} {_group_unit()}  ({n_done}/{n_total} {'biases' if _BIAS_MODE else 'powers'} done)  "
+            f"— Scale all CE groups for this {'bias' if _BIAS_MODE else 'power'}, then advance."
         )
         self._pl_next_btn.setVisible(False)
         self._pl_to_wl_btn.setVisible(False)
@@ -4004,7 +4189,7 @@ class PowerPipelineTab(QWidget):
                     None
                 )
                 self._pl_dark_status.setText(
-                    f"✓ Power {power:.2f} mW done — advancing to next power…"
+                    f"✓ {'Bias' if _BIAS_MODE else 'Power'} {power:.2f} {_group_unit()} done — advancing…"
                 )
                 self._pl_next_btn.setVisible(True)
                 self._pl_to_wl_btn.setVisible(False)
@@ -4016,7 +4201,7 @@ class PowerPipelineTab(QWidget):
         self._pl_next_btn.setVisible(False)
         self._pl_to_wl_btn.setVisible(True)
         self._pl_dark_status.setText(
-            "✓ All powers done — press '② White Dark ▶' to continue."
+            f"✓ All {'biases' if _BIAS_MODE else 'powers'} done — press '② White Dark ▶' to continue."
         )
 
     def _advance_pl_power(self):
@@ -4225,8 +4410,8 @@ class PowerPipelineTab(QWidget):
                     return None
                 for c in canonical:
                     if _powers_match(p, c):
-                        return f"{c:.2f} mW"
-                return f"{p:.2f} mW"
+                        return f"{c:.2f} {_group_unit()}"
+                return f"{p:.2f} {_group_unit()}"
 
             ax = self._corr_plot.ax
             ax.clear()
@@ -4280,7 +4465,10 @@ class PowerPipelineTab(QWidget):
         hdr = QWidget()
         hdr_lay = QHBoxLayout(hdr)
         hdr_lay.setContentsMargins(4, 4, 4, 4)
-        hdr_lay.addWidget(QLabel("<b>⑤ Power Series Plot</b>"))
+        self._power_plot_hdr_lbl = QLabel(
+            f"<b>⑤ {'Bias' if _BIAS_MODE else 'Power'} Series Plot</b>"
+        )
+        hdr_lay.addWidget(self._power_plot_hdr_lbl)
         hdr_lay.addStretch()
         back_btn = QPushButton("◀ Back to Stitch")
         back_btn.clicked.connect(lambda: self._stack.setCurrentIndex(self.PAGE_STITCH))
@@ -4316,8 +4504,11 @@ class PowerPipelineTab(QWidget):
         hdr_lay.setContentsMargins(4, 4, 4, 4)
         hdr_lay.addWidget(QLabel("<b>⑥ Export</b>"))
         hdr_lay.addStretch()
-        back_btn = QPushButton("◀ Back to Power Plot")
-        back_btn.clicked.connect(self._goto_power_plot)
+        self._export_back_btn = QPushButton(
+            f"◀ Back to {'Bias' if _BIAS_MODE else 'Power'} Series Plot"
+        )
+        self._export_back_btn.clicked.connect(self._goto_power_plot)
+        back_btn = self._export_back_btn
         hdr_lay.addWidget(back_btn)
         lay.addWidget(hdr)
         lay.addWidget(self.embedded_export_tab, 1)
@@ -4390,6 +4581,37 @@ class PowerPipelineTab(QWidget):
             if self.replay_fn:
                 self.replay_fn(path)
 
+    def refresh_group_labels(self):
+        """Update all 'Power/Powers' labels in the pipeline header to match bias mode."""
+        _g  = 'bias'   if _BIAS_MODE else 'power'
+        _G  = 'Bias'   if _BIAS_MODE else 'Power'
+        _Gs = 'Biases' if _BIAS_MODE else 'Powers'
+        self._overview_title_lbl.setText(
+            f"<b>{'Bias-by-Bias' if _BIAS_MODE else 'Power-by-Power'} Pipeline</b>"
+        )
+        self._pl_dark_header_lbl.setText(f"<b>① PL Dark — {_G}:</b>")
+        self._pl_next_btn.setText(f"Next {_G} ▶")
+        self._pl_to_wl_btn.setText(f"All {_Gs} Done — ② White Dark ▶")
+        self._stitch_hdr_lbl.setText(f"<b>④ Stitch — {_G} by {_G}</b>")
+        if hasattr(self, "_stitch_to_plot_btn"):
+            self._stitch_to_plot_btn.setText(f"⑤ {_G} Series Plot →")
+        if hasattr(self, "_power_plot_hdr_lbl"):
+            self._power_plot_hdr_lbl.setText(f"<b>⑤ {_G} Series Plot</b>")
+        if hasattr(self, "_export_back_btn"):
+            self._export_back_btn.setText(f"◀ Back to {_G} Series Plot")
+        # Phase nav button index 4 = Power/Bias Plot
+        if len(self._phase_labels) > 4:
+            self._phase_labels[4].setText(f"⑤ {_G} Plot")
+        self._overview_desc_lbl.setText(
+            f"Guided analysis — all steps happen here, nothing to navigate away:\n"
+            f"  ①  Scale PL dark spectra for each {_g} independently\n"
+            f"  ②  Scale white dark spectra (once, for all spectral windows)\n"
+            f"  ③  Auto-compute and apply whitelight correction\n"
+            f"  ④  Stitch spectra {_g} by {_g}\n"
+            f"  ⑤  Plot and export the {_g} series\n\n"
+            f"Load PL, dark, white, and halogen files in Tab ① before starting."
+        )
+
     # ══ Called when this tab becomes visible ═══════════════════════════════
 
     def refresh_status(self):
@@ -4420,22 +4642,31 @@ class StandardModeTab(QWidget):
     that MainWindow can still reference them directly for wiring.
     """
 
-    _TAB_LABELS = [
+    _TAB_LABELS_BASE = [
         "① Dark Scaling (PL)",
         "② Dark Scaling (White)",
         "③ Apply Corrections",
         "④ PL Analysis",
         "⑤ Stitch & Export",
-        "⑥ Power Series Plot",
+        None,  # index 5: "⑥ Power/Bias Series Plot" — set dynamically
     ]
-    # Tab index → label shown on the advance button
-    _NEXT_LABELS = {
-        0: "② Dark Scaling (White)",
-        1: "③ Apply Corrections",
-        2: "④ PL Analysis",
-        3: "⑤ Stitch & Export",
-        4: "⑥ Power Series Plot",
-    }
+
+    @property
+    def _TAB_LABELS(self):
+        labels = list(self._TAB_LABELS_BASE)
+        labels[5] = f"⑥ {'Bias' if _BIAS_MODE else 'Power'} Series Plot"
+        return labels
+
+    @property
+    def _NEXT_LABELS(self):
+        ps = f"{'Bias' if _BIAS_MODE else 'Power'} Series Plot"
+        return {
+            0: "② Dark Scaling (White)",
+            1: "③ Apply Corrections",
+            2: "④ PL Analysis",
+            3: "⑤ Stitch & Export",
+            4: f"⑥ {ps}",
+        }
 
     def __init__(self,
                  dark_scaling_pl_tab,
@@ -4520,6 +4751,11 @@ class StandardModeTab(QWidget):
         else:
             self._next_btn.setVisible(False)
 
+    def refresh_group_labels(self):
+        """Update the 'Power Series Plot' tab label when bias mode changes."""
+        self.inner_tabs.setTabText(5, self._TAB_LABELS[5])
+        self.refresh_next_btn()   # re-render the Continue button text if visible
+
     def _advance_tab(self):
         idx = self.inner_tabs.currentIndex()
         if idx < self.inner_tabs.count() - 1:
@@ -4580,6 +4816,23 @@ class MainWindow(QMainWindow):
 
         self.calib_tab.on_pl_files_changed = _on_pl_files_changed
         self.calib_tab.on_replay_requested = self._replay_from_json
+
+        def _on_bias_mode_changed():
+            for tab in (self.std_stitch_tab, self.pipeline_stitch_tab):
+                tab.refresh_group_labels()
+            for tab in (self.std_pl_tab, self.pipeline_pl_tab):
+                tab.refresh_group_labels()
+            self.pipeline_export_tab.refresh_group_labels()
+            self.pipeline_tab.refresh_group_labels()
+            self.standard_mode_tab.refresh_group_labels()
+            # Update the outer tab label "Power-by-Power Pipeline"
+            pip_idx = self.tabs.indexOf(self.pipeline_tab)
+            self.tabs.setTabText(
+                pip_idx,
+                f"② {'Bias-by-Bias' if _BIAS_MODE else 'Power-by-Power'} Pipeline"
+            )
+
+        self.calib_tab.on_bias_mode_changed = _on_bias_mode_changed
 
         # ════════════════════════════════════════════════════════════════════
         # STANDARD MODE TABS
@@ -4861,13 +5114,13 @@ class MainWindow(QMainWindow):
                     )
                 if issues:
                     problems.append(
-                        f"  {p:.2f} mW ({n} file(s)) — " + "; ".join(issues)
+                        f"  {p:.2f} {_group_unit()} ({n} file(s)) — " + "; ".join(issues)
                     )
 
             if problems:
                 return (
-                    f"Inconsistent measurements across powers "
-                    f"(reference: {ref_power:.2f} mW — {ref_count} file(s), "
+                    f"Inconsistent measurements across {'biases' if _BIAS_MODE else 'powers'} "
+                    f"(reference: {ref_power:.2f} {_group_unit()} — {ref_count} file(s), "
                     f"{', '.join(f'{c:.3f} eV' for c in sorted(ref_ces))}):\n"
                     + "\n".join(problems)
                     + "\n\nUncheck the duplicate or load missing files in Tab ① "
@@ -4898,8 +5151,9 @@ class MainWindow(QMainWindow):
         )
 
         # ── Three top-level tabs ──────────────────────────────────────────────
+        _pip_label = f"② {'Bias-by-Bias' if _BIAS_MODE else 'Power-by-Power'} Pipeline"
         tabs.addTab(self.calib_tab,          "① Load Files")
-        tabs.addTab(self.pipeline_tab,       "② Power-by-Power Pipeline")
+        tabs.addTab(self.pipeline_tab,       _pip_label)
         tabs.addTab(self.standard_mode_tab,  "③ Automatic Analysis")
 
         self.setCentralWidget(tabs)
@@ -5020,6 +5274,12 @@ class MainWindow(QMainWindow):
         elif pip_corr_applied:
             # Correction was done but no stitching — defer to Start Pipeline.
             self.pipeline_tab._correction_applied = True
+
+        # Sync the bias mode checkbox without re-triggering _set_bias_mode.
+        if getattr(self.calib_tab, "_restored_bias_mode", False):
+            self.calib_tab.bias_mode_chk.blockSignals(True)
+            self.calib_tab.bias_mode_chk.setChecked(True)
+            self.calib_tab.bias_mode_chk.blockSignals(False)
 
         # Re-save once so the session file reflects the fully-restored state.
         self.calib_tab._save_session()
@@ -5429,7 +5689,7 @@ class PowerSeriesPlotTab(QWidget):
         self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # ── Controls ──────────────────────────────────────────────────────
-        ctrl = QGroupBox("⑦  Power Series Plot  —  adjust settings and press 'Plot'")
+        ctrl = QGroupBox(f"{'Bias' if _BIAS_MODE else 'Power'} Series Plot  —  adjust settings and press 'Plot'")
         cg   = QVBoxLayout(ctrl)
 
         # Row 1: xlim / ylim
@@ -5465,14 +5725,14 @@ class PowerSeriesPlotTab(QWidget):
         title_row = QHBoxLayout()
         title_row.addWidget(QLabel("Title:"))
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("Power series — sample name")
+        self.title_edit.setPlaceholderText(f"{'Bias' if _BIAS_MODE else 'Power'} series — sample name")
         title_row.addWidget(self.title_edit, 1)
         cg.addLayout(title_row)
 
         # Row 3: annotation text + x/y position
         ann_row = QHBoxLayout()
         self.ann_chk = QCheckBox("Show annotation")
-        self.ann_chk.setChecked(True)
+        self.ann_chk.setChecked(False)
         ann_row.addWidget(self.ann_chk)
 
         self.ann_edit = QTextEdit()
@@ -5552,7 +5812,7 @@ class PowerSeriesPlotTab(QWidget):
             color = _POWER_SERIES_COLORS[idx % len(_POWER_SERIES_COLORS)]
             x = df["Energy"].to_numpy(float)
             y = df["Counts"].to_numpy(float)
-            ax.plot(x, y, label=f"{power:.2f} mW",
+            ax.plot(x, y, label=f"{power:.2f} {_group_unit()}",
                     linewidth=2, color=color)
 
         ax.set_yscale("log")
